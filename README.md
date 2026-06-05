@@ -1,77 +1,77 @@
 # Hi-Voicer
 
-Hi-Voicer 是一个本地离线中文语音输入和文件转录桌面软件。当前版本参考 CapsWriter-Offline / ime_audio 的本地 ASR 思路，优先走 Sherpa-ONNX CPU 稳定路线：软件负责录音、转码、调用本地模型、把结果粘贴上屏或保存为文本文件。
+Hi-Voicer 是一个面向 Windows 的本地离线语音工作台。它把日常语音输入、音频/视频文件转录、字幕校对、术语替换和基础音频处理放在同一个桌面应用里完成；模型、录音、缓存和转录结果默认留在本机，不需要把音频上传到云端服务。
 
-<img width="1919" height="976" alt="屏幕截图 2026-06-01 181536" src="https://github.com/user-attachments/assets/de738e7b-8eea-48ee-afd5-83bfb2bdffbf" />
+# 产品预览
+<img width="1919" height="1034" alt="屏幕截图 2026-06-06 012403" src="https://github.com/user-attachments/assets/3d3a02a7-8146-41c0-ae9c-207a4a991226" />
+<img width="1919" height="1032" alt="屏幕截图 2026-06-06 012443" src="https://github.com/user-attachments/assets/58ed1be1-2740-4468-a34e-6711d8e5d5d4" />
+<img width="1919" height="1014" alt="屏幕截图 2026-06-06 012521" src="https://github.com/user-attachments/assets/bfc9d081-6831-46e3-8ebb-5cd23efb4926" />
+<img width="1919" height="1027" alt="屏幕截图 2026-06-06 012553" src="https://github.com/user-attachments/assets/a2050ac9-4d15-497b-bd70-11006a9ab479" />
+<img width="1919" height="1024" alt="屏幕截图 2026-06-06 012625" src="https://github.com/user-attachments/assets/5275c939-200b-43d1-b746-6f4da50da84b" />
 
-## 普通用户怎么用
 
-1. 从 [GitHub Releases](https://github.com/secure-artifacts/Hi-Voicer/releases) 下载最新的 `Hi-Voicer_0.2.2_x64-setup.exe`，也可以下载同版本 MSI 包。
-2. 打开 Hi-Voicer，进入“设置”。
-3. 在“离线模型”里选择一个支持自动配置的 Sherpa 模型，点击“下载并配置”。
-4. 回到首页，在任意输入框按住快捷键说话，松开后自动识别并粘贴。
-5. 文件转录在“转录”页选择音频或视频文件，结果可保存为纯文本，或带时间线文本加 `.srt` 字幕。
+## 适合谁
 
-普通用户不需要安装 Node.js、Rust、Visual Studio Build Tools 这些开发工具。首次配置模型时需要联网，软件会下载 Sherpa-ONNX CPU 运行时和模型文件；下载完成后，录音识别和文件转录在本地运行。ffmpeg 不会自动联网下载，音频转码、字幕片段导出、双轨混音和基础音频处理需要本机已安装 ffmpeg，或把 `ffmpeg.exe` 放到应用数据目录/程序目录的 `engines\ffmpeg` 下。Windows 需要 Microsoft Edge WebView2 Runtime，绝大多数 Windows 10/11 机器已经自带；如果极少数电脑打不开软件，先安装 WebView2 Runtime。
+* 想用快捷键在任意输入框里说话并自动上屏的人。
+* 需要把会议、网课、录音、视频整理成文字或字幕的人。
+* 希望转录流程尽量离线、本地可控的人。
+* 需要批量处理音频、校正字幕片段、维护术语替换表的用户。
 
-## 验证软件来源
+## 主要能力
 
-发布安装包由 GitHub Actions 在 tag push 后自动构建并上传，不使用本地手工打包产物。下载后可以用 GitHub CLI 验证来源：
+* 语音输入：支持按住说话、连续识别、纯录音三种模式。
+* 文件转录：支持音频和常见视频文件，导出纯文本、时间线文本和 SRT 字幕。
+* 字幕编辑：校正文案、拆分/合并字幕、播放选中片段、导出选中片段音频。
+* 术语库：把常见错词、专有名词和客户名统一替换。
+* 音频处理：标准化音量、裁剪静音、基础人声滤波、低频嗡声处理。
+* 本机诊断：检查模型、CUDA 回退、麦克风、系统声音和 ffmpeg 状态。
+
+## 下载与安装
+
+从 [secure-artifacts/Hi-Voicer Releases](https://github.com/secure-artifacts/Hi-Voicer/releases) 下载最新版：
+
+* 推荐普通用户使用 `Hi-Voicer\_0.2.2\_x64-setup.exe`
+* 也可以下载同版本 MSI 安装包
+
+首次配置模型时需要联网下载模型和 Sherpa-ONNX 运行时。配置完成后，录音识别和文件转录在本地运行。音频转码、字幕片段导出、双轨混音和音频处理需要本机已有 `ffmpeg.exe`，或把它放到应用数据目录/程序目录的 `engines\\ffmpeg` 下。
+
+## 快速开始
+
+1. 安装并打开 Hi-Voicer。
+2. 进入“设置”，选择支持自动配置的本地 ASR 模型。
+3. 点击“下载并配置”，等待模型准备完成。
+4. 回到首页，在任意输入框按快捷键说话，松开后自动识别并粘贴。
+5. 转录长音频或视频时，进入“转录”页添加文件，再按需导出文本或字幕。
+
+## 发布来源验证
+
+正式安装包由 `secure-artifacts/Hi-Voicer` 的 GitHub Actions 在 `v\*` tag 推送后自动构建、生成 attestation 并上传到 Release。不要使用来历不明的本地手工包。
+
+下载后可以用 GitHub CLI 验证来源：
 
 ```powershell
-gh attestation verify .\Hi-Voicer_0.2.2_x64-setup.exe --repo secure-artifacts/Hi-Voicer
+gh attestation verify .\\Hi-Voicer\_0.2.2\_x64-setup.exe --repo secure-artifacts/Hi-Voicer
 ```
 
 ## 当前模型策略
 
-0.2.2 正式版继续维护 Sherpa-ONNX CPU 运行时，避免普通用户同时维护太多引擎。模型文件统一从 Hugging Face 下载；Sherpa-ONNX 运行时来自官方 GitHub Release，它是本地推理程序，不是模型源。
+0.2.2 默认走 Sherpa-ONNX CPU 稳定路线，优先保证普通 Windows 机器能跑通。GPU 加速仍作为实验路线保留，选择 CUDA 但本机运行时不可用时会回退 CPU。
 
-- SenseVoiceSmall：默认推荐，中文输入和短音频延迟更合适，可一键配置。
-- Qwen3-ASR 0.6B：可一键配置，体积更大，适合试 Qwen3-ASR 路线。
-- Sherpa FunASR-Nano：可一键配置，中文质量优先，下载时间更长。
-- OpenAI Whisper Base：可一键配置，适合多语言文件转录验证。
-- Sherpa Paraformer / Zipformer：轻量备用模型，适合低配置电脑快速跑通。
-- Qwen3-ASR 1.7B：先保留为候选入口；官方原始权重不能直接当本地转录模型用，需要稳定的 ONNX/GGUF 推理包后再做一键运行。
+推荐模型：
 
-## 常驻和启动
+* SenseVoiceSmall：默认推荐，适合中文语音输入和低延迟短音频转录。
+* Qwen3-ASR 0.6B：可一键配置，适合验证 Qwen3-ASR 路线。
+* Sherpa FunASR-Nano：中文质量优先，下载体积更大。
+* OpenAI Whisper Base：适合多语言文件转录验证。
+* Sherpa Paraformer / Zipformer：轻量备用模型，适合低配置电脑。
 
-- 正式安装包不会显示服务端窗口。
-- 关闭主窗口会隐藏到系统托盘。
-- 托盘左键可重新打开，托盘菜单可退出。
-- 设置里可以开启开机启动，登录 Windows 后自动后台常驻。
-- 语音输入会粘贴上屏，并在首页保留最近文字历史，可复制或下载。
-- 需要排查时可在设置里开启“保存录音”，录音片段会保留在应用数据目录的 `recordings` 文件夹。
-- 软件包含一个置顶 mini 录制按钮窗口，录制时底部会显示声波提示。
+## 常见说明
 
-## 数据和迁移
+* 普通用户不需要安装 Node.js、Rust 或 Visual Studio Build Tools。
+* 关闭主窗口会隐藏到系统托盘；托盘菜单可重新打开或退出。
+* 开启“保留识别录音”后，录音片段会保存在应用数据目录的 `recordings` 文件夹。
+* `models` 目录里已有可用模型时，软件启动会自动绑定，不需要每次手动选择模型目录。
+* Windows 需要 Microsoft Edge WebView2 Runtime；多数 Windows 10/11 机器已自带。
 
-用户设置、下载的模型、Sherpa-ONNX、手动放置的 ffmpeg、录音缓存都放在系统的应用数据目录下，不写到项目源码目录。换电脑时建议：
 
-1. 先安装 Hi-Voicer。
-2. 打开一次软件，让系统创建应用数据目录。
-3. 重新在设置里点击“下载并配置”模型，或者把旧电脑应用数据目录里的 `models` 和 `engines` 复制过去。
 
-如果 `models` 目录里已经有可用模型，软件启动时会自动绑定，不需要每次重新选择模型目录。
-
-## GPU 加速
-
-GPU 加速还在后续实验阶段，0.2.2 正式版默认发布 CPU 稳定路线。转录过程中不会自动下载 CUDA runtime；如果选择 CUDA 但本地 CUDA runtime 没准备好，会直接回退 CPU。当前 SenseVoice + Sherpa-ONNX CPU 方案在中文转录速度和准确度之间更稳，后续会另开 GPU 后端验证路线。
-
-开发源码和依赖都留在当前项目目录里，适合整体迁移：
-
-- Node 依赖锁定在 `package-lock.json`。
-- Rust 工具链锁定在 `rust-toolchain.toml`。
-- Windows 环境检查脚本在 `scripts\check-env.ps1`。
-- Windows 环境安装脚本在 `scripts\setup-windows.ps1`。
-
-## 开发验证
-
-```powershell
-npm ci
-npm test
-npm run build
-cargo check --manifest-path src-tauri\Cargo.toml
-npm run tauri -- build
-```
-
-更多模型说明见 `docs\模型说明.md`，环境说明见 `docs\环境准备.md`。
