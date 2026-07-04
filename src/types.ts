@@ -207,6 +207,26 @@ export interface AccelerationSmokeTestResult {
   message: string;
 }
 
+export interface DirectMlAdapterInfo {
+  name: string;
+  driverVersion?: string | null;
+  adapterRamMb?: number | null;
+  status?: string | null;
+}
+
+export interface DirectMlProbeResult {
+  directmlCandidate: boolean;
+  modelReady: boolean;
+  modelId?: string | null;
+  modelName?: string | null;
+  modelDir: string;
+  missingFiles: string[];
+  adapters: DirectMlAdapterInfo[];
+  elapsedMs: number;
+  message: string;
+  nextStep: string;
+}
+
 export interface NativeAudioDiagnostics {
   microphoneAvailable: boolean;
   microphoneName?: string | null;

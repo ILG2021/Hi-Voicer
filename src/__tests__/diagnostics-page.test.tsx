@@ -4,6 +4,7 @@ import { initialDiagnostics, initialSettings } from "../data/mockState";
 import {
   getNativeAudioDiagnostics,
   runAccelerationSmokeTest,
+  runDirectMlProbe,
   saveTextFile,
   selectAudioFiles,
   transcribeFile,
@@ -48,6 +49,27 @@ vi.mock("../lib/api", () => ({
       elapsedMs: 123,
       transcriptPreview: "",
       message: "CPU smoke test completed; silent audio does not need recognized text.",
+    }),
+  ),
+  runDirectMlProbe: vi.fn(() =>
+    Promise.resolve({
+      directmlCandidate: true,
+      modelReady: true,
+      modelId: "sensevoice-small",
+      modelName: "SenseVoiceSmall",
+      modelDir: "C:\\models\\sensevoice-small",
+      missingFiles: [],
+      adapters: [
+        {
+          name: "NVIDIA GeForce RTX 3060",
+          driverVersion: "31.0.15.8195",
+          adapterRamMb: 4096,
+          status: "OK",
+        },
+      ],
+      elapsedMs: 45,
+      message: "DirectML PoC prerequisites look ready for SenseVoiceSmall.",
+      nextStep: "Wire ONNX Runtime DirectML and run a real SenseVoice inference smoke test.",
     }),
   ),
   saveTextFile: vi.fn(() => Promise.resolve("C:\\reports\\diagnostics.txt")),
@@ -95,6 +117,19 @@ describe("DiagnosticsPage", () => {
     await waitFor(() => {
       expect(getNativeAudioDiagnostics).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("runs the DirectML PoC probe with the current settings", async () => {
+    const settings = { ...initialSettings, modelDir: "C:\\models\\sensevoice-small" };
+    render(<DiagnosticsPage items={initialDiagnostics} modelReady={true} settings={settings} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /DirectML PoC probe/ }));
+
+    await waitFor(() => {
+      expect(runDirectMlProbe).toHaveBeenCalledWith(settings);
+    });
+    expect(await screen.findByText(/DirectML PoC prerequisites/)).toBeTruthy();
+    expect(screen.getByText("NVIDIA GeForce RTX 3060")).toBeTruthy();
   });
 
   it("runs the CPU smoke test with the current settings", async () => {

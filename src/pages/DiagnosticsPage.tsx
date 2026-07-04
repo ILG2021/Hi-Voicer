@@ -4,11 +4,19 @@ import {
   getAccelerationStatus,
   getNativeAudioDiagnostics,
   runAccelerationSmokeTest,
+  runDirectMlProbe,
   saveTextFile,
   selectAudioFiles,
   transcribeFile,
 } from "../lib/api";
-import type { AccelerationSmokeTestResult, AccelerationStatus, DiagnosticItem, NativeAudioDiagnostics, UserSettings } from "../types";
+import type {
+  AccelerationSmokeTestResult,
+  AccelerationStatus,
+  DiagnosticItem,
+  DirectMlProbeResult,
+  NativeAudioDiagnostics,
+  UserSettings,
+} from "../types";
 
 interface DiagnosticsPageProps {
   items: DiagnosticItem[];
@@ -27,6 +35,7 @@ function buildDiagnosticReport(
   status: AccelerationStatus | null,
   smokeResult: AccelerationSmokeTestResult | null,
   audioDiagnostics: NativeAudioDiagnostics | null,
+  directMlProbeResult: DirectMlProbeResult | null,
 ) {
   const lines = [
     "Hi-Voicer 诊断报告",
@@ -52,6 +61,21 @@ function buildDiagnosticReport(
     );
   } else {
     lines.push("状态尚未完成检测。");
+  }
+
+  lines.push("", "[DirectML PoC]");
+  if (directMlProbeResult) {
+    lines.push(
+      "DirectML candidate: " + (directMlProbeResult.directmlCandidate ? "yes" : "no"),
+      "SenseVoice model ready: " + (directMlProbeResult.modelReady ? "yes" : "no"),
+      "Model: " + (directMlProbeResult.modelName || directMlProbeResult.modelId || "(none)"),
+      "Missing files: " + (directMlProbeResult.missingFiles.join(", ") || "(none)"),
+      "Adapters: " + (directMlProbeResult.adapters.map((adapter) => adapter.name).join(" | ") || "(none)"),
+      "Message: " + directMlProbeResult.message,
+      "Next step: " + directMlProbeResult.nextStep,
+    );
+  } else {
+    lines.push("Not run.");
   }
 
   lines.push("", "[CPU smoke test]");
@@ -97,6 +121,8 @@ export function DiagnosticsPage({ items, modelReady, settings }: DiagnosticsPage
   const [accelerationSmokeResult, setAccelerationSmokeResult] = useState<AccelerationSmokeTestResult | null>(null);
   const [accelerationStatus, setAccelerationStatus] = useState<AccelerationStatus | null>(null);
   const [nativeAudioDiagnostics, setNativeAudioDiagnostics] = useState<NativeAudioDiagnostics | null>(null);
+  const [directMlProbeResult, setDirectMlProbeResult] = useState<DirectMlProbeResult | null>(null);
+  const [isCheckingDirectMl, setIsCheckingDirectMl] = useState(false);
   const [isCheckingNativeAudio, setIsCheckingNativeAudio] = useState(false);
 
   useEffect(() => {
@@ -153,6 +179,20 @@ export function DiagnosticsPage({ items, modelReady, settings }: DiagnosticsPage
     }
   }
 
+  async function handleDirectMlProbe() {
+    setIsCheckingDirectMl(true);
+    setAccelerationTestResult("");
+    try {
+      const result = await runDirectMlProbe(settings);
+      setDirectMlProbeResult(result);
+      setAccelerationTestResult(result.message + " Elapsed " + result.elapsedMs + " ms. Next: " + result.nextStep);
+    } catch (error) {
+      setAccelerationTestResult(error instanceof Error ? error.message : "DirectML PoC probe failed.");
+    } finally {
+      setIsCheckingDirectMl(false);
+    }
+  }
+
   async function handleAccelerationSmokeTest() {
     setIsTestingAcceleration(true);
     setAccelerationTestResult("");
@@ -172,7 +212,7 @@ export function DiagnosticsPage({ items, modelReady, settings }: DiagnosticsPage
     const audioDiagnostics = nativeAudioDiagnostics ?? (await getNativeAudioDiagnostics());
     setAccelerationStatus(status);
     setNativeAudioDiagnostics(audioDiagnostics);
-    const report = buildDiagnosticReport(settings, modelReady, items, status, accelerationSmokeResult, audioDiagnostics);
+    const report = buildDiagnosticReport(settings, modelReady, items, status, accelerationSmokeResult, audioDiagnostics, directMlProbeResult);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const path = await saveTextFile(`hi-voicer-diagnostics-${stamp}.txt`, report);
     if (path) {
@@ -269,6 +309,40 @@ export function DiagnosticsPage({ items, modelReady, settings }: DiagnosticsPage
             </div>
           )}
         </div>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={!modelReady || isCheckingDirectMl}
+          onClick={() => void handleDirectMlProbe()}
+        >
+          <TestTube2 size={17} />
+          {isCheckingDirectMl ? "Running DirectML PoC probe..." : "Run DirectML PoC probe"}
+        </button>
+        {directMlProbeResult && (
+          <div className="diagnostic-list">
+            <div className={"diagnostic-row diagnostic-row--" + (directMlProbeResult.directmlCandidate ? "ok" : "warning")}>
+              <strong>DirectML candidate</strong>
+              <p>{directMlProbeResult.directmlCandidate ? "GPU adapter candidate found" : "No candidate GPU adapter found"}</p>
+            </div>
+            <div className={"diagnostic-row diagnostic-row--" + (directMlProbeResult.modelReady ? "ok" : "warning")}>
+              <strong>SenseVoiceSmall</strong>
+              <p>
+                {directMlProbeResult.modelReady
+                  ? "Model files are ready"
+                  : "Missing: " + (directMlProbeResult.missingFiles.join(", ") || "SenseVoiceSmall model")}
+              </p>
+            </div>
+            {directMlProbeResult.adapters.map((adapter) => (
+              <div className="diagnostic-row diagnostic-row--ok" key={adapter.name}>
+                <strong>{adapter.name}</strong>
+                <p>
+                  {adapter.driverVersion || "driver unknown"}
+                  {adapter.adapterRamMb ? " / " + adapter.adapterRamMb + " MB" : ""}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
         <button
           className="secondary-button"
           type="button"

@@ -13,6 +13,7 @@ import type {
   ModelInstallProgress,
   ModelPreset,
   ModelValidationResult,
+  DirectMlProbeResult,
   NativeAudioDiagnostics,
   ProbeMediaFrameRateResult,
   TranscriptionPerformanceMode,
@@ -374,6 +375,30 @@ export async function runAccelerationSmokeTest(settings: UserSettings): Promise<
       accelerationMode: settings.accelerationMode ?? "cpu",
     },
   });
+}
+
+export async function runDirectMlProbe(settings: UserSettings): Promise<DirectMlProbeResult> {
+  const modelDir = settings.transcriptionModelDir || settings.modelDir;
+  if (!modelDir) {
+    throw new Error("Configure SenseVoiceSmall before running the DirectML PoC probe.");
+  }
+
+  try {
+    return await invoke<DirectMlProbeResult>("run_directml_probe", { request: { modelDir } });
+  } catch (error) {
+    return {
+      directmlCandidate: false,
+      modelReady: false,
+      modelId: null,
+      modelName: null,
+      modelDir,
+      missingFiles: [],
+      adapters: [],
+      elapsedMs: 0,
+      message: error instanceof Error ? error.message : "DirectML PoC probe failed.",
+      nextStep: "Keep using the stable CPU/Sherpa path.",
+    };
+  }
 }
 
 export async function getNativeAudioDiagnostics(): Promise<NativeAudioDiagnostics> {

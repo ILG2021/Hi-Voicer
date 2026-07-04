@@ -393,6 +393,36 @@ struct AccelerationSmokeTestResult {
     message: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectMlProbeRequest {
+    model_dir: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct DirectMlAdapterInfo {
+    name: String,
+    driver_version: Option<String>,
+    adapter_ram_mb: Option<u64>,
+    status: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectMlProbeResult {
+    directml_candidate: bool,
+    model_ready: bool,
+    model_id: Option<String>,
+    model_name: Option<String>,
+    model_dir: String,
+    missing_files: Vec<String>,
+    adapters: Vec<DirectMlAdapterInfo>,
+    elapsed_ms: u128,
+    message: String,
+    next_step: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NativeAudioDiagnostics {
@@ -3469,6 +3499,145 @@ fn write_smoke_test_wav(path: &Path) -> Result<(), String> {
     writer.finalize().map_err(|error| error.to_string())
 }
 
+fn adapter_ram_mb_from_value(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_u64().map(|bytes| bytes / 1024 / 1024),
+        serde_json::Value::String(text) => {
+            text.parse::<u64>().ok().map(|bytes| bytes / 1024 / 1024)
+        }
+        _ => None,
+    }
+}
+
+fn directml_adapter_from_json(value: &serde_json::Value) -> Option<DirectMlAdapterInfo> {
+    let name = value.get("Name")?.as_str()?.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+
+    Some(DirectMlAdapterInfo {
+        name,
+        driver_version: value
+            .get("DriverVersion")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        adapter_ram_mb: value.get("AdapterRAM").and_then(adapter_ram_mb_from_value),
+        status: value
+            .get("Status")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+    })
+}
+
+fn directml_adapters_from_powershell_json(text: &str) -> Vec<DirectMlAdapterInfo> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text.trim()) else {
+        return Vec::new();
+    };
+
+    match value {
+        serde_json::Value::Array(items) => items
+            .iter()
+            .filter_map(directml_adapter_from_json)
+            .collect(),
+        item => directml_adapter_from_json(&item).into_iter().collect(),
+    }
+}
+
+fn query_directml_candidate_adapters() -> Vec<DirectMlAdapterInfo> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+
+    let mut command = Command::new("powershell");
+    command.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,AdapterRAM,Status | ConvertTo-Json -Compress",
+    ]);
+
+    let Ok(output) =
+        run_command_with_timeout(&mut command, Duration::from_secs(8), "DirectML GPU probe")
+    else {
+        return Vec::new();
+    };
+
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    directml_adapters_from_powershell_json(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn is_directml_candidate_adapter(adapter: &DirectMlAdapterInfo) -> bool {
+    let name = adapter.name.to_ascii_lowercase();
+    let status_ok = adapter
+        .status
+        .as_deref()
+        .map(|status| status.eq_ignore_ascii_case("OK"))
+        .unwrap_or(true);
+
+    status_ok
+        && !name.contains("microsoft basic")
+        && !name.contains("remote")
+        && !name.contains("render driver")
+}
+
+fn directml_probe_for_model_dir(model_dir: &str) -> DirectMlProbeResult {
+    let started_at = Instant::now();
+    let model_path = PathBuf::from(model_dir);
+    let engine = read_sherpa_engine(&model_path).ok();
+    let mut missing_files = Vec::new();
+
+    let model_id = engine.as_ref().map(|engine| engine.model_id.clone());
+    let model_name = engine.as_ref().map(|engine| engine.model_name.clone());
+    let is_sensevoice = model_id.as_deref() == Some("sensevoice-small");
+
+    if !model_path.exists() {
+        missing_files.push("model directory".to_string());
+    }
+    for required in ["engine.json", "model.int8.onnx", "tokens.txt"] {
+        if !model_path.join(required).exists() {
+            missing_files.push(required.to_string());
+        }
+    }
+
+    let adapters = query_directml_candidate_adapters();
+    let directml_candidate = adapters.iter().any(is_directml_candidate_adapter);
+    let model_ready = is_sensevoice && missing_files.is_empty();
+    let message = if model_ready && directml_candidate {
+        "DirectML PoC prerequisites look ready for SenseVoiceSmall.".to_string()
+    } else if !is_sensevoice {
+        "DirectML PoC currently only targets SenseVoiceSmall.".to_string()
+    } else if !missing_files.is_empty() {
+        format!(
+            "SenseVoiceSmall files are incomplete: {}",
+            missing_files.join(", ")
+        )
+    } else {
+        "No usable Windows GPU adapter was detected by the DirectML probe.".to_string()
+    };
+    let next_step = if model_ready && directml_candidate {
+        "Wire ONNX Runtime DirectML and run a real SenseVoice inference smoke test.".to_string()
+    } else {
+        "Keep using the stable CPU/Sherpa path; fix the reported prerequisite before testing DirectML inference.".to_string()
+    };
+
+    DirectMlProbeResult {
+        directml_candidate,
+        model_ready,
+        model_id,
+        model_name,
+        model_dir: model_dir.to_string(),
+        missing_files,
+        adapters,
+        elapsed_ms: started_at.elapsed().as_millis(),
+        message,
+        next_step,
+    }
+}
+
 fn run_acceleration_smoke_test_inner(
     app: AppHandle,
     request: AccelerationSmokeTestRequest,
@@ -5791,6 +5960,13 @@ async fn run_acceleration_smoke_test(
 }
 
 #[tauri::command]
+async fn run_directml_probe(request: DirectMlProbeRequest) -> Result<DirectMlProbeResult, String> {
+    tauri::async_runtime::spawn_blocking(move || directml_probe_for_model_dir(&request.model_dir))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_native_audio_diagnostics(app: AppHandle) -> NativeAudioDiagnostics {
     native_audio_diagnostics(&app)
 }
@@ -5876,6 +6052,7 @@ pub fn run() {
             get_acceleration_status,
             prepare_acceleration_runtime,
             run_acceleration_smoke_test,
+            run_directml_probe,
             get_native_audio_diagnostics,
             start_recording,
             stop_recording
@@ -6189,6 +6366,29 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn parses_directml_adapter_probe_json() {
+        let adapters = directml_adapters_from_powershell_json(
+            r#"[{"Name":"NVIDIA GeForce RTX 3060 Laptop GPU","DriverVersion":"31.0.15.8195","AdapterRAM":4293918720,"Status":"OK"}]"#,
+        );
+
+        assert_eq!(adapters.len(), 1);
+        assert!(is_directml_candidate_adapter(&adapters[0]));
+        assert_eq!(adapters[0].adapter_ram_mb, Some(4095));
+    }
+
+    #[test]
+    fn rejects_basic_display_adapter_as_directml_candidate() {
+        let adapter = DirectMlAdapterInfo {
+            name: "Microsoft Basic Display Adapter".to_string(),
+            driver_version: None,
+            adapter_ram_mb: None,
+            status: Some("OK".to_string()),
+        };
+
+        assert!(!is_directml_candidate_adapter(&adapter));
     }
 
     #[test]
