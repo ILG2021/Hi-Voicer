@@ -388,6 +388,8 @@ export async function runDirectMlProbe(settings: UserSettings): Promise<DirectMl
   } catch (error) {
     return {
       directmlCandidate: false,
+      providerSessionReady: false,
+      providerSessionError: error instanceof Error ? error.message : "DirectML provider probe failed.",
       modelReady: false,
       directmlSessionReady: false,
       directmlSessionError: error instanceof Error ? error.message : "DirectML PoC probe failed.",

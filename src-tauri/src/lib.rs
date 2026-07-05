@@ -422,6 +422,8 @@ struct DirectMlSessionProbeCliResult {
 #[serde(rename_all = "camelCase")]
 struct DirectMlProbeResult {
     directml_candidate: bool,
+    provider_session_ready: bool,
+    provider_session_error: Option<String>,
     model_ready: bool,
     directml_session_ready: bool,
     directml_session_error: Option<String>,
@@ -3620,8 +3622,104 @@ fn ort_outlet_summaries(outlets: &[ort::value::Outlet]) -> Vec<String> {
         .collect()
 }
 
-fn create_directml_sensevoice_session(
+fn append_proto_varint(out: &mut Vec<u8>, mut value: u64) {
+    while value >= 0x80 {
+        out.push((value as u8) | 0x80);
+        value >>= 7;
+    }
+    out.push(value as u8);
+}
+
+fn append_proto_key(out: &mut Vec<u8>, field_number: u32, wire_type: u8) {
+    append_proto_varint(out, ((field_number as u64) << 3) | wire_type as u64);
+}
+
+fn append_proto_int(out: &mut Vec<u8>, field_number: u32, value: u64) {
+    append_proto_key(out, field_number, 0);
+    append_proto_varint(out, value);
+}
+
+fn append_proto_string(out: &mut Vec<u8>, field_number: u32, value: &str) {
+    append_proto_key(out, field_number, 2);
+    append_proto_varint(out, value.len() as u64);
+    out.extend_from_slice(value.as_bytes());
+}
+
+fn append_proto_message(out: &mut Vec<u8>, field_number: u32, value: Vec<u8>) {
+    append_proto_key(out, field_number, 2);
+    append_proto_varint(out, value.len() as u64);
+    out.extend_from_slice(&value);
+}
+
+fn directml_identity_model_bytes() -> Vec<u8> {
+    fn dim(value: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        append_proto_int(&mut out, 1, value);
+        out
+    }
+
+    fn tensor_shape() -> Vec<u8> {
+        let mut out = Vec::new();
+        append_proto_message(&mut out, 1, dim(1));
+        out
+    }
+
+    fn tensor_type() -> Vec<u8> {
+        let mut out = Vec::new();
+        append_proto_int(&mut out, 1, 1);
+        append_proto_message(&mut out, 2, tensor_shape());
+        out
+    }
+
+    fn value_info(name: &str) -> Vec<u8> {
+        let mut type_proto = Vec::new();
+        append_proto_message(&mut type_proto, 1, tensor_type());
+
+        let mut out = Vec::new();
+        append_proto_string(&mut out, 1, name);
+        append_proto_message(&mut out, 2, type_proto);
+        out
+    }
+
+    let mut node = Vec::new();
+    append_proto_string(&mut node, 1, "X");
+    append_proto_string(&mut node, 2, "Y");
+    append_proto_string(&mut node, 3, "IdentityNode");
+    append_proto_string(&mut node, 4, "Identity");
+
+    let mut graph = Vec::new();
+    append_proto_message(&mut graph, 1, node);
+    append_proto_string(&mut graph, 2, "HiVoicerDirectMlIdentityGraph");
+    append_proto_message(&mut graph, 11, value_info("X"));
+    append_proto_message(&mut graph, 12, value_info("Y"));
+
+    let mut opset = Vec::new();
+    append_proto_int(&mut opset, 2, 13);
+
+    let mut model = Vec::new();
+    append_proto_int(&mut model, 1, 7);
+    append_proto_string(&mut model, 2, "hi-voicer-directml-probe");
+    append_proto_message(&mut model, 7, graph);
+    append_proto_message(&mut model, 8, opset);
+    model
+}
+
+fn create_directml_identity_session() -> Result<DirectMlSessionProbeCliResult, String> {
+    let model_path = std::env::temp_dir().join(format!(
+        "hi-voicer-directml-identity-{}-{}.onnx",
+        std::process::id(),
+        unix_timestamp_millis()?
+    ));
+    fs::write(&model_path, directml_identity_model_bytes())
+        .map_err(|error| format!("Failed to write DirectML identity probe model: {error}"))?;
+    let result = create_directml_session_from_file(&model_path, "identity");
+    let _ = fs::remove_file(&model_path);
+    result
+}
+
+fn create_directml_session_from_file(
     model_path: &Path,
+    label: &str,
 ) -> Result<DirectMlSessionProbeCliResult, String> {
     if !cfg!(windows) {
         return Err("DirectML is only available on Windows.".to_string());
@@ -3659,7 +3757,7 @@ fn create_directml_sensevoice_session(
 
     let session = session_builder
         .commit_from_file(model_path)
-        .map_err(|error| format!("Failed to create DirectML SenseVoice ONNX session: {error}"))?;
+        .map_err(|error| format!("Failed to create DirectML {label} ONNX session: {error}"))?;
     let input_count = session.inputs().len();
     let output_count = session.outputs().len();
     let inputs = ort_outlet_summaries(session.inputs());
@@ -3669,7 +3767,7 @@ fn create_directml_sensevoice_session(
     Ok(DirectMlSessionProbeCliResult {
         ok: true,
         message: format!(
-            "DirectML SenseVoice session created; inputs: {input_count}, outputs: {output_count}"
+            "DirectML {label} session created; inputs: {input_count}, outputs: {output_count}"
         ),
         model_inputs: inputs,
         model_outputs: outputs,
@@ -3677,24 +3775,23 @@ fn create_directml_sensevoice_session(
     })
 }
 
-fn create_directml_sensevoice_session_in_child(
-    model_path: &Path,
+fn create_directml_session_in_child(
+    mode: &str,
+    model_path: Option<&Path>,
+    timeout: Duration,
+    description: &str,
 ) -> Result<DirectMlSessionProbeCliResult, String> {
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let mut command = Command::new(executable);
-    command
-        .arg("--hi-voicer-directml-probe")
-        .arg(model_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    command.arg(mode);
+    if let Some(model_path) = model_path {
+        command.arg(model_path);
+    }
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     suppress_command_window(&mut command);
 
-    let output = run_command_with_timeout(
-        &mut command,
-        Duration::from_secs(30),
-        "DirectML SenseVoice session child probe",
-    )
-    .map_err(|error| error.to_string())?;
+    let output = run_command_with_timeout(&mut command, timeout, description)
+        .map_err(|error| error.to_string())?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
@@ -3711,8 +3808,28 @@ fn create_directml_sensevoice_session_in_child(
         .unwrap_or_else(|| "terminated by signal or native exception".to_string());
     let detail = if stderr.is_empty() { stdout } else { stderr };
     Err(format!(
-        "DirectML child probe failed with exit code {code}: {detail}"
+        "{description} failed with exit code {code}: {detail}"
     ))
+}
+
+fn create_directml_provider_session_in_child() -> Result<DirectMlSessionProbeCliResult, String> {
+    create_directml_session_in_child(
+        "--hi-voicer-directml-provider-probe",
+        None,
+        Duration::from_secs(15),
+        "DirectML provider identity child probe",
+    )
+}
+
+fn create_directml_sensevoice_session_in_child(
+    model_path: &Path,
+) -> Result<DirectMlSessionProbeCliResult, String> {
+    create_directml_session_in_child(
+        "--hi-voicer-directml-probe",
+        Some(model_path),
+        Duration::from_secs(30),
+        "DirectML SenseVoice session child probe",
+    )
 }
 
 pub fn run_cli_mode() -> bool {
@@ -3721,17 +3838,23 @@ pub fn run_cli_mode() -> bool {
     let Some(mode) = args.next() else {
         return false;
     };
-    if mode != "--hi-voicer-directml-probe" {
-        return false;
-    }
-    suppress_windows_fault_dialogs();
-
-    let Some(model_path) = args.next() else {
-        eprintln!("missing model path");
-        std::process::exit(2);
+    let probe_result = match mode.to_string_lossy().as_ref() {
+        "--hi-voicer-directml-provider-probe" => {
+            suppress_windows_fault_dialogs();
+            create_directml_identity_session()
+        }
+        "--hi-voicer-directml-probe" => {
+            suppress_windows_fault_dialogs();
+            let Some(model_path) = args.next() else {
+                eprintln!("missing model path");
+                std::process::exit(2);
+            };
+            create_directml_session_from_file(&PathBuf::from(model_path), "SenseVoice")
+        }
+        _ => return false,
     };
 
-    match create_directml_sensevoice_session(&PathBuf::from(model_path)) {
+    match probe_result {
         Ok(result) => match serde_json::to_string(&result) {
             Ok(raw) => println!("{raw}"),
             Err(error) => {
@@ -3821,8 +3944,20 @@ fn directml_probe_for_model_dir(
     let adapters = query_directml_candidate_adapters();
     let directml_candidate = adapters.iter().any(is_directml_candidate_adapter);
     let model_ready = is_sensevoice && missing_files.is_empty();
-    let directml_session_result = if model_ready && directml_candidate {
+    let provider_session_result = if directml_candidate {
+        create_directml_provider_session_in_child()
+    } else {
+        Err("DirectML provider check skipped because no usable GPU adapter was detected.".to_string())
+    };
+    let provider_session_ready = provider_session_result
+        .as_ref()
+        .map(|result| result.ok)
+        .unwrap_or(false);
+    let provider_session_error = provider_session_result.as_ref().err().cloned();
+    let directml_session_result = if model_ready && provider_session_ready {
         create_directml_sensevoice_session_in_child(&model_path.join("model.int8.onnx"))
+    } else if !provider_session_ready {
+        Err("SenseVoice session check skipped because the DirectML provider probe failed.".to_string())
     } else {
         Err("DirectML session check skipped because prerequisites are incomplete.".to_string())
     };
@@ -3834,6 +3969,7 @@ fn directml_probe_for_model_dir(
     let onnx_runtime_build = directml_session_result
         .as_ref()
         .ok()
+        .or_else(|| provider_session_result.as_ref().ok())
         .and_then(|result| result.onnx_runtime_build.clone());
     let model_inputs = directml_session_result
         .as_ref()
@@ -3845,6 +3981,8 @@ fn directml_probe_for_model_dir(
         .unwrap_or_default();
     let message = if let Ok(session_result) = &directml_session_result {
         session_result.message.clone()
+    } else if let Err(provider_error) = &provider_session_result {
+        provider_error.clone()
     } else if !is_sensevoice {
         "DirectML PoC currently only targets SenseVoiceSmall.".to_string()
     } else if !missing_files.is_empty() {
@@ -3862,12 +4000,18 @@ fn directml_probe_for_model_dir(
     let next_step = if directml_session_ready {
         "Add the DirectML audio feature-extraction and decoder path behind an experimental toggle."
             .to_string()
+    } else if provider_session_ready && model_ready {
+        "DirectML provider works, but SenseVoiceSmall session creation failed; test another ONNX Runtime version or a DirectML-friendly split model before enabling transcription.".to_string()
+    } else if provider_session_ready {
+        "DirectML provider works; install or select SenseVoiceSmall before testing model compatibility.".to_string()
     } else {
-        "Keep using the stable CPU/Sherpa path; fix the reported prerequisite before testing DirectML inference.".to_string()
+        "Keep using the stable CPU/Sherpa path; DirectML provider session is not reliable on this machine.".to_string()
     };
 
     DirectMlProbeResult {
         directml_candidate,
+        provider_session_ready,
+        provider_session_error,
         model_ready,
         directml_session_ready,
         directml_session_error,
@@ -6623,6 +6767,15 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn directml_identity_probe_model_has_expected_onnx_markers() {
+        let bytes = directml_identity_model_bytes();
+        let text = String::from_utf8_lossy(&bytes);
+
+        assert!(text.contains("Identity"));
+        assert!(text.contains("HiVoicerDirectMlIdentityGraph"));
     }
 
     #[test]

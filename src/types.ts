@@ -216,6 +216,8 @@ export interface DirectMlAdapterInfo {
 
 export interface DirectMlProbeResult {
   directmlCandidate: boolean;
+  providerSessionReady: boolean;
+  providerSessionError?: string | null;
   modelReady: boolean;
   directmlSessionReady: boolean;
   directmlSessionError?: string | null;

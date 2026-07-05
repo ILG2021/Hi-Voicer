@@ -67,6 +67,8 @@ function buildDiagnosticReport(
   if (directMlProbeResult) {
     lines.push(
       "DirectML candidate: " + (directMlProbeResult.directmlCandidate ? "yes" : "no"),
+      "DirectML provider ready: " + (directMlProbeResult.providerSessionReady ? "yes" : "no"),
+      "DirectML provider error: " + (directMlProbeResult.providerSessionError || "(none)"),
       "SenseVoice model ready: " + (directMlProbeResult.modelReady ? "yes" : "no"),
       "DirectML session ready: " + (directMlProbeResult.directmlSessionReady ? "yes" : "no"),
       "DirectML session error: " + (directMlProbeResult.directmlSessionError || "(none)"),
@@ -328,6 +330,10 @@ export function DiagnosticsPage({ items, modelReady, settings }: DiagnosticsPage
             <div className={"diagnostic-row diagnostic-row--" + (directMlProbeResult.directmlCandidate ? "ok" : "warning")}>
               <strong>DirectML candidate</strong>
               <p>{directMlProbeResult.directmlCandidate ? "GPU adapter candidate found" : "No candidate GPU adapter found"}</p>
+            </div>
+            <div className={"diagnostic-row diagnostic-row--" + (directMlProbeResult.providerSessionReady ? "ok" : "warning")}>
+              <strong>DirectML provider</strong>
+              <p>{directMlProbeResult.providerSessionReady ? "Minimal ONNX session created" : directMlProbeResult.providerSessionError || "DirectML provider probe failed"}</p>
             </div>
             <div className={"diagnostic-row diagnostic-row--" + (directMlProbeResult.modelReady ? "ok" : "warning")}>
               <strong>SenseVoiceSmall</strong>

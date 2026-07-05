@@ -54,6 +54,8 @@ vi.mock("../lib/api", () => ({
   runDirectMlProbe: vi.fn(() =>
     Promise.resolve({
       directmlCandidate: true,
+      providerSessionReady: true,
+      providerSessionError: null,
       modelReady: true,
       directmlSessionReady: true,
       directmlSessionError: null,
@@ -134,6 +136,7 @@ describe("DiagnosticsPage", () => {
       expect(runDirectMlProbe).toHaveBeenCalledWith(settings);
     });
     expect(await screen.findAllByText(/DirectML SenseVoice session created/)).toHaveLength(2);
+    expect(screen.getByText(/Minimal ONNX session created/)).toBeTruthy();
     expect(screen.getByText(/speech: Tensor<Float32>/)).toBeTruthy();
     expect(screen.getByText("NVIDIA GeForce RTX 3060")).toBeTruthy();
   });
