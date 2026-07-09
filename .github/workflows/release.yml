@@ -45,6 +45,26 @@ jobs:
         run: npm test
 
 
+      - name: Prepare FFmpeg runtime
+        shell: pwsh
+        run: |
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          $archive = Join-Path $env:RUNNER_TEMP "ffmpeg-release-essentials.zip"
+          $extractDir = Join-Path $env:RUNNER_TEMP "ffmpeg-release-essentials"
+          $targetDir = "src-tauri/resources/engines/ffmpeg/bin"
+
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $extractDir -Force
+          $ffmpeg = Get-ChildItem -Path $extractDir -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+          if (-not $ffmpeg) { throw "ffmpeg.exe was not found in the downloaded FFmpeg package." }
+          $sourceBin = $ffmpeg.Directory.FullName
+          if (-not (Test-Path (Join-Path $sourceBin "ffprobe.exe"))) { throw "ffprobe.exe was not found next to ffmpeg.exe." }
+
+          New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+          Copy-Item -LiteralPath (Join-Path $sourceBin "ffmpeg.exe") -Destination (Join-Path $targetDir "ffmpeg.exe") -Force
+          Copy-Item -LiteralPath (Join-Path $sourceBin "ffprobe.exe") -Destination (Join-Path $targetDir "ffprobe.exe") -Force
+          & (Join-Path $targetDir "ffmpeg.exe") -version
+          Get-ChildItem $targetDir
       - name: Build Tauri app
         run: npm run tauri -- build
 
