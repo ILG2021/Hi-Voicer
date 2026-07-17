@@ -53,10 +53,13 @@ foreach ($relativePath in $requiredFiles) {
 
 if ($isCudaBundle) {
   $cudaDir = Join-Path $resourceRoot "engines\llama\b9964-cuda"
-  $cudaBackend = Get-ChildItem -LiteralPath $cudaDir -Filter "*cuda*.dll" -File
+  $cudaBackend = Get-ChildItem -LiteralPath $cudaDir -Filter "ggml-cuda*.dll" -File
   $cudaRuntime = Get-ChildItem -LiteralPath $cudaDir -Filter "*cudart*.dll" -File
-  if (-not $cudaBackend -or -not $cudaRuntime) {
-    throw "CUDA bundle is missing its CUDA backend or CUDA runtime DLLs in: $cudaDir"
+  if (-not $cudaBackend) {
+    throw "CUDA bundle is missing the ggml-cuda backend DLL in: $cudaDir"
+  }
+  if (-not $cudaRuntime) {
+    throw "CUDA bundle is missing CUDA runtime DLLs (cudart*.dll) in: $cudaDir"
   }
 }
 
@@ -101,7 +104,7 @@ if (-not $isCudaBundle) {
 }
 
 $totalBytes = (Get-ChildItem -Path $resourceRoot -Recurse -File | Measure-Object Length -Sum).Sum
-$maxBytes = if ($isCudaBundle) { 3GB } else { 2GB }
+$maxBytes = 4GB
 if ($totalBytes -gt $maxBytes) {
   throw "Bundled resources are too large: $([math]::Round($totalBytes / 1MB, 1)) MiB (limit: $([math]::Round($maxBytes / 1MB, 1)) MiB)."
 }

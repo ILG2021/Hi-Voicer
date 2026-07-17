@@ -104,14 +104,14 @@ function Invoke-VariantBuild {
         $env:HIVOICER_BUILD_VARIANT = ""
     }
 
-    # -- 5. Locate the freshly built NSIS installer and copy to dist-builds/ --
-    $nsisDir = Join-Path $root "src-tauri\target\release\bundle\nsis"
-    $installer = Get-ChildItem -Path $nsisDir -Filter "*-setup.exe" -ErrorAction SilentlyContinue |
+    # -- 5. Locate the freshly built MSI and copy to dist-builds/ --
+    $msiDir = Join-Path $root "src-tauri\target\release\bundle\msi"
+    $installer = Get-ChildItem -Path $msiDir -Filter "*.msi" -ErrorAction SilentlyContinue |
                  Sort-Object LastWriteTime -Descending |
                  Select-Object -First 1
 
     if (-not $installer) {
-        throw "NSIS installer not found in: $nsisDir"
+        throw "MSI installer not found in: $msiDir"
     }
 
     $destPath = Join-Path $outDir $installer.Name
