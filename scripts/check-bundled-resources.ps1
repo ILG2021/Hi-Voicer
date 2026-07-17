@@ -52,6 +52,8 @@ foreach ($relativePath in $requiredFiles) {
 }
 
 if ($isCudaBundle) {
+  # Inno Setup handles large files via streaming -- full cudart bundle is supported.
+  # Both the GPU backend (ggml-cuda.dll) and CUDA runtime DLLs must be present.
   $cudaDir = Join-Path $resourceRoot "engines\llama\b9964-cuda"
   $cudaBackend = Get-ChildItem -LiteralPath $cudaDir -Filter "ggml-cuda*.dll" -File
   $cudaRuntime = Get-ChildItem -LiteralPath $cudaDir -Filter "*cudart*.dll" -File
