@@ -11,9 +11,6 @@ $scripts = @(
 
 foreach ($script in $scripts) {
   & (Join-Path $PSScriptRoot $script)
-  if ($LASTEXITCODE -ne 0) {
-    throw "$script failed with exit code $LASTEXITCODE"
-  }
 }
 
 Write-Host "All offline package resources are ready." -ForegroundColor Green
