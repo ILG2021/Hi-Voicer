@@ -86,18 +86,21 @@ function Invoke-VariantBuild {
     # -- 3. Export env var so check-bundled-resources.ps1 knows the variant --
     $env:HIVOICER_BUILD_VARIANT = $BuildVariant
 
-    # -- 4. Run Tauri build, overriding productName via --config --
-    $configJson = '{"productName":"' + $productName + '"}'
-    Write-Host "[*] Running tauri build [$variantLabel]..." -ForegroundColor Yellow
+    # -- 4. Run Tauri build, overriding productName via a temp config file --
+    #        (inline JSON via --config loses quotes through npm -> tauri on Windows)
+    $tempConfig = Join-Path $env:TEMP ("hivoicer-build-config-{0}.json" -f $BuildVariant)
+    @{ productName = $productName } | ConvertTo-Json -Compress | Set-Content -Path $tempConfig -Encoding UTF8
+    Write-Host "[*] Running tauri build [$variantLabel] (config: $tempConfig)..." -ForegroundColor Yellow
 
     Push-Location $root
     try {
-        npm run tauri -- build --config $configJson
+        npm run tauri -- build --config $tempConfig
         if ($LASTEXITCODE -ne 0) {
             throw "Tauri build failed for variant: $BuildVariant (exit code $LASTEXITCODE)"
         }
     } finally {
         Pop-Location
+        Remove-Item -Path $tempConfig -ErrorAction SilentlyContinue
         $env:HIVOICER_BUILD_VARIANT = ""
     }
 
