@@ -55,20 +55,35 @@ function Find-IsccPath {
 }
 
 # ------------------------------------------
-#  Helper: cache the WebView2 bootstrapper
+#  Helper: pre-flight check before ISCC
 # ------------------------------------------
-function Get-WebView2Bootstrapper {
-    param([string]$CacheDir)
-    $dest = Join-Path $CacheDir "MicrosoftEdgeWebview2Setup.exe"
-    if (Test-Path -LiteralPath $dest) {
-        Write-Host "  WebView2 bootstrapper already cached." -ForegroundColor DarkGray
-        return
+function Test-IssSourceFiles {
+    param([string]$SourceRoot)
+    Write-Host "[*] Pre-flight: checking Inno Setup source files..." -ForegroundColor Yellow
+    $required = @(
+        "src-tauri\target\release\hi-voicer.exe",
+        "src-tauri\icons\icon.ico",
+        "src-tauri\resources"
+    )
+    $missing = @()
+    foreach ($rel in $required) {
+        $abs = Join-Path $SourceRoot $rel
+        if (-not (Test-Path -LiteralPath $abs)) {
+            $missing += $rel
+        }
     }
-    New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null
-    Write-Host "  Downloading WebView2 bootstrapper (~2 MB)..." -ForegroundColor Yellow
-    $url = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
-    Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-    Write-Host "  WebView2 bootstrapper cached." -ForegroundColor Green
+    $wv2 = Join-Path $SourceRoot ".tmp\webview2\MicrosoftEdgeWebview2Setup.exe"
+    if (-not (Test-Path -LiteralPath $wv2)) {
+        Write-Host "  [WARN] WebView2 bootstrapper not found -- will skip it in installer." -ForegroundColor DarkYellow
+    } else {
+        Write-Host "  WebView2 bootstrapper: OK" -ForegroundColor DarkGray
+    }
+    if ($missing.Count -gt 0) {
+        Write-Host "[!] Missing files required by Inno Setup:" -ForegroundColor Red
+        foreach ($m in $missing) { Write-Host "    - $m" -ForegroundColor Red }
+        throw "Pre-flight failed: $($missing.Count) file(s) missing (see above)"
+    }
+    Write-Host "  All required source files present." -ForegroundColor DarkGray
 }
 
 # ------------------------------------------
@@ -151,20 +166,9 @@ function Invoke-CudaBuild {
     Write-Host "[*] Locating Inno Setup..." -ForegroundColor Yellow
     $iscc = Find-IsccPath
     Write-Host "  Found: $iscc" -ForegroundColor DarkGray
-
-    # -- 2. Cache WebView2 bootstrapper --
-    Write-Host "[*] Checking WebView2 bootstrapper..." -ForegroundColor Yellow
-    Get-WebView2Bootstrapper -CacheDir (Join-Path $root ".tmp\webview2")
     Write-Host ""
 
-    # -- 3. Remove CPU llama dir so it is not bundled --
-    $otherDir = Join-Path $llamaEnginesDir "b9964"
-    if (Test-Path -LiteralPath $otherDir) {
-        Write-Host "  Removing CPU llama dir (CUDA-only bundle)..." -ForegroundColor DarkGray
-        Remove-Item -LiteralPath $otherDir -Recurse -Force
-    }
-
-    # -- 4. Prepare full CUDA llama runtime (including cudart DLLs) --
+    # -- 2. Remove CPU llama dir so it is not bundled --
     Write-Host "[*] Preparing llama.cpp [cuda] runtime (full, incl. cudart)..." -ForegroundColor Yellow
     & (Join-Path $PSScriptRoot "prepare-llama-runtime.ps1") -Variant cuda
     Write-Host ""
@@ -194,10 +198,18 @@ function Invoke-CudaBuild {
     }
     Write-Host ""
 
-    # -- 8. Run Inno Setup --
+    # -- 8. Pre-flight: verify all source files exist before calling ISCC --
+    Test-IssSourceFiles -SourceRoot $root
+
+    # -- 9. Run Inno Setup --
     Write-Host "[*] Running Inno Setup (ISCC)..." -ForegroundColor Yellow
     $issFile = Join-Path $PSScriptRoot "hivoicer.iss"
+    Write-Host "  iscc   : $iscc" -ForegroundColor DarkGray
+    Write-Host "  issFile: $issFile" -ForegroundColor DarkGray
+    Write-Host "  root   : $root" -ForegroundColor DarkGray
+    # /O+ = verbose file output listing (helps diagnose missing-file errors)
     & $iscc `
+        "/O+" `
         "/DAppVariantSuffix= CUDA" `
         "/DAppVersion=$appVersion" `
         "/DSourceRoot=$root" `
