@@ -4,6 +4,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $modelsRoot = Join-Path $repoRoot "src-tauri\resources\models"
 $senseRevision = "2365baeacb507f821a0c8120fcee3d484dba7a07"
+$tokensSha256 = "F449EB28DC567533D7FA59BE34E2ABCA8784F771850C78A47FB731A31429A1DC"
+$vadSha256 = "9E2449E1087496D8D4CABA907F23E0BD3F78D91FA552479BB9C23AC09CBB1FD6"
 
 
 function Install-VerifiedFile {
@@ -13,25 +15,7 @@ function Install-VerifiedFile {
     [Parameter(Mandatory = $true)][string]$Sha256
   )
 
-  if (Test-Path -LiteralPath $Destination) {
-    $existingHash = Get-FileSha256 -Path $Destination
-    if ($existingHash -eq $Sha256) {
-      Write-Host "Verified existing model file: $Destination"
-      return
-    }
-    Remove-Item -LiteralPath $Destination -Force
-  }
-
-  $parent = Split-Path -Parent $Destination
-  New-Item -ItemType Directory -Path $parent -Force | Out-Null
-  $partial = "$Destination.download"
-  Invoke-WebRequest -Uri $Url -OutFile $partial
-  $actualHash = Get-FileSha256 -Path $partial
-  if ($actualHash -ne $Sha256) {
-    Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
-    throw "Model checksum mismatch for $Url. Expected $Sha256, got $actualHash."
-  }
-  Move-Item -LiteralPath $partial -Destination $Destination -Force
+  Save-VerifiedDownload -Url $Url -Destination $Destination -Sha256 $Sha256
 }
 
 $senseDir = Join-Path $modelsRoot "sensevoice-small"
@@ -42,16 +26,12 @@ Install-VerifiedFile `
 
 $tokensUrl = "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/$senseRevision/tokens.txt"
 $tokensPath = Join-Path $senseDir "tokens.txt"
-$tokensPartial = "$tokensPath.download"
-New-Item -ItemType Directory -Path $senseDir -Force | Out-Null
-Invoke-WebRequest -Uri $tokensUrl -OutFile $tokensPartial
-$tokensText = Get-Content -Raw -LiteralPath $tokensPartial
-$tokensBytes = (Get-Item -LiteralPath $tokensPartial).Length
-if ($tokensBytes -lt 300KB -or $tokensBytes -gt 330KB -or $tokensText -match "<html") {
-  Remove-Item -LiteralPath $tokensPartial -Force -ErrorAction SilentlyContinue
-  throw "SenseVoice tokens file from the pinned revision is invalid."
-}
-Move-Item -LiteralPath $tokensPartial -Destination $tokensPath -Force
+Install-VerifiedFile -Url $tokensUrl -Destination $tokensPath -Sha256 $tokensSha256
+
+Install-VerifiedFile `
+  -Url "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx" `
+  -Destination (Join-Path $modelsRoot "silero_vad.onnx") `
+  -Sha256 $vadSha256
 
 $senseConfig = @{
   engine = "sherpa-onnx"

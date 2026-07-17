@@ -46,7 +46,7 @@ $missingRequired = @($cfg.RequiredFiles | Where-Object { -not (Test-Path -Litera
 $cudaRuntimeReady = $Variant -ne "cuda" -or @(Get-ChildItem -LiteralPath $targetDir -Filter "*cudart*.dll" -File -ErrorAction SilentlyContinue).Count -gt 0
 if ($missingRequired.Count -eq 0 -and $cudaRuntimeReady) {
     Write-Host "llama-server.exe already present at $targetDir — skipping download." -ForegroundColor Green
-    exit 0
+    return
 }
 
 # ──────────────────────────────────────────
@@ -62,13 +62,7 @@ function Get-VerifiedZip {
     $archivePath = Join-Path $env:TEMP $archiveName
     $extractDir  = Join-Path $env:TEMP ($archiveName -replace '\.zip$', '')
 
-    Write-Host "Downloading $archiveName ..."
-    Invoke-WebRequest -Uri $Url -OutFile $archivePath
-
-    $actualHash = Get-FileSha256 -Path $archivePath
-    if ($actualHash -ne $ExpectedSha256.ToUpper()) {
-        throw "Checksum mismatch for $archiveName.`n  Expected: $ExpectedSha256`n  Got:      $actualHash"
-    }
+    Save-VerifiedDownload -Url $Url -Destination $archivePath -Sha256 $ExpectedSha256
     Write-Host "SHA256 verified: $archiveName" -ForegroundColor Green
 
     if (Test-Path -LiteralPath $extractDir) { Remove-Item -LiteralPath $extractDir -Recurse -Force }

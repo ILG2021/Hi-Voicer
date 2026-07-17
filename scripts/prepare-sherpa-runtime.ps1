@@ -12,11 +12,16 @@ $requiredFiles = @("sherpa-onnx-offline.exe")
 
 $archivePath = Join-Path $env:TEMP $archiveName
 $extractDir = Join-Path $env:TEMP "hi-voicer-sherpa-$runtimeTag"
-Invoke-WebRequest -Uri $url -OutFile $archivePath
-$actualHash = Get-FileSha256 -Path $archivePath
-if ($actualHash -ne $archiveSha256) {
-  throw "Sherpa-ONNX archive checksum mismatch. Expected $archiveSha256, got $actualHash."
+$versionMarker = Join-Path $targetBin ".archive-sha256"
+$runtimeReady = (Test-Path -LiteralPath (Join-Path $targetBin "sherpa-onnx-offline.exe")) -and
+  (Test-Path -LiteralPath $versionMarker) -and
+  ((Get-Content -Raw -LiteralPath $versionMarker).Trim() -eq $archiveSha256)
+if ($runtimeReady) {
+  Write-Host "Sherpa-ONNX $runtimeTag runtime is already prepared."
+  return
 }
+
+Save-VerifiedDownload -Url $url -Destination $archivePath -Sha256 $archiveSha256
 
 if (Test-Path -LiteralPath $extractDir) {
   Remove-Item -LiteralPath $extractDir -Recurse -Force
@@ -39,6 +44,7 @@ foreach ($file in $requiredFiles) {
   }
   Copy-Item -LiteralPath $source -Destination (Join-Path $targetBin $file) -Force
 }
+[IO.File]::WriteAllText($versionMarker, $archiveSha256, (New-Object Text.UTF8Encoding($false)))
 
 $totalBytes = (Get-ChildItem -LiteralPath $targetBin -File | Measure-Object Length -Sum).Sum
 Write-Host "Prepared minimal Sherpa-ONNX CPU runtime: $([math]::Round($totalBytes / 1MB, 1)) MiB"

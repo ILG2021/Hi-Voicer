@@ -9,12 +9,18 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $targetDir = Join-Path $repoRoot "src-tauri\resources\engines\ffmpeg\bin"
 $archivePath = Join-Path $env:TEMP "hi-voicer-$archiveName"
 $extractDir = Join-Path $env:TEMP "hi-voicer-ffmpeg-$ffmpegVersion"
+$versionMarker = Join-Path $targetDir ".archive-sha256"
 
-Invoke-WebRequest -Uri $url -OutFile $archivePath
-$actualHash = Get-FileSha256 -Path $archivePath
-if ($actualHash -ne $archiveSha256) {
-  throw "FFmpeg archive checksum mismatch. Expected $archiveSha256, got $actualHash."
+$runtimeReady = (Test-Path -LiteralPath (Join-Path $targetDir "ffmpeg.exe")) -and
+  (Test-Path -LiteralPath (Join-Path $targetDir "ffprobe.exe")) -and
+  (Test-Path -LiteralPath $versionMarker) -and
+  ((Get-Content -Raw -LiteralPath $versionMarker).Trim() -eq $archiveSha256)
+if ($runtimeReady) {
+  Write-Host "FFmpeg $ffmpegVersion runtime is already prepared."
+  return
 }
+
+Save-VerifiedDownload -Url $url -Destination $archivePath -Sha256 $archiveSha256
 
 if (Test-Path -LiteralPath $extractDir) {
   Remove-Item -LiteralPath $extractDir -Recurse -Force
@@ -35,4 +41,5 @@ if (Test-Path -LiteralPath $targetDir) {
 New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $sourceDir "ffmpeg.exe") -Destination (Join-Path $targetDir "ffmpeg.exe") -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir "ffprobe.exe") -Destination (Join-Path $targetDir "ffprobe.exe") -Force
+[IO.File]::WriteAllText($versionMarker, $archiveSha256, (New-Object Text.UTF8Encoding($false)))
 Write-Host "Prepared verified FFmpeg runtime at $targetDir"
