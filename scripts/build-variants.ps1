@@ -212,7 +212,6 @@ function Invoke-CudaBuild {
         "/O+" `
         "/DAppVariantSuffix= CUDA" `
         "/DAppVersion=$appVersion" `
-        "/DSourceRoot=$root" `
         $issFile
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup (ISCC) failed (exit $LASTEXITCODE)" }
 
