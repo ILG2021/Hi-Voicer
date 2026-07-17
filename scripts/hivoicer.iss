@@ -19,24 +19,25 @@
 ; Compute repo root from this script's own location:
 ;   hivoicer.iss lives in  <repo>/scripts/
 ;   SourcePath           =  <repo>/scripts/    (ISPP built-in, with trailing backslash)
-;   RemoveBackslash(...)  =>  <repo>/scripts
-;   ExtractFilePath(...)  =>  <repo>/           (with trailing backslash)
-;   RemoveBackslash(...)  =>  <repo>
-#define SourceRoot RemoveBackslash(ExtractFilePath(RemoveBackslash(SourcePath)))
+;   RemoveBackslashUnlessRoot(...)  =>  <repo>/scripts
+;   ExtractFilePath(...)            =>  <repo>/           (with trailing backslash)
+;   RemoveBackslashUnlessRoot(...)  =>  <repo>
+#define SourceRoot RemoveBackslashUnlessRoot(ExtractFilePath(RemoveBackslashUnlessRoot(SourcePath)))
 
 #define AppNameBase  "Hi-Voicer"
 #define AppNameFull  AppNameBase + AppVariantSuffix
 #define AppExeName   "hi-voicer.exe"
 
-; Separate AppId ensures CPU and CUDA can coexist on the same machine
+; Separate AppId (as plain GUID string) ensures CPU and CUDA can coexist.
+; In [Setup], {{ is an escaped { so AppId={{{#AppGuid}} expands to {GUID}.
 #if AppVariantSuffix == " CUDA"
-  #define AppId "{A8F3C912-4B2E-4D1A-9C7F-BE2341056789}_CUDA"
+  #define AppGuid "A8F3C912-4B2E-4D1A-9C7F-BE2341056790"
 #else
-  #define AppId "{A8F3C912-4B2E-4D1A-9C7F-BE2341056789}_CPU"
+  #define AppGuid "A8F3C912-4B2E-4D1A-9C7F-BE2341056789"
 #endif
 
 [Setup]
-AppId={#AppId}
+AppId={{{#AppGuid}}
 AppName={#AppNameFull}
 AppVersion={#AppVersion}
 AppPublisher=Hi-Voicer
