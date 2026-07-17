@@ -3707,34 +3707,44 @@ fn build_native_recognizer_config(
     match engine.model_id.as_str() {
         "sensevoice-small" => {
             config.model_config.sense_voice = OfflineSenseVoiceModelConfig {
-                model: required("model.int8.onnx").or_else(|_| required("model.onnx"))?,
+                model: Some(
+                    required("model.int8.onnx").or_else(|_| required("model.onnx"))?,
+                ),
                 use_itn: true,
                 ..Default::default()
             };
-            config.model_config.tokens = required("tokens.txt")?;
+            config.model_config.tokens = Some(required("tokens.txt")?);
         }
         "qwen3-asr-0.6b" => {
             config.model_config.qwen3_asr = OfflineQwen3ASRModelConfig {
-                conv_frontend: required("conv_frontend.onnx")?,
-                encoder: required("encoder.int8.onnx")
-                    .or_else(|_| required("encoder.onnx"))?,
-                decoder: required("decoder.int8.onnx")
-                    .or_else(|_| required("decoder.onnx"))?,
-                tokenizer: model_dir
-                    .join("tokenizer")
-                    .to_str()
-                    .map(str::to_string)
-                    .ok_or_else(|| "Qwen3-ASR tokenizer path is not valid UTF-8".to_string())?,
+                conv_frontend: Some(required("conv_frontend.onnx")?),
+                encoder: Some(
+                    required("encoder.int8.onnx").or_else(|_| required("encoder.onnx"))?,
+                ),
+                decoder: Some(
+                    required("decoder.int8.onnx").or_else(|_| required("decoder.onnx"))?,
+                ),
+                tokenizer: Some(
+                    model_dir
+                        .join("tokenizer")
+                        .to_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| {
+                            "Qwen3-ASR tokenizer path is not valid UTF-8".to_string()
+                        })?,
+                ),
                 ..Default::default()
             };
-            config.model_config.tokens = required("tokens.txt")?;
+            config.model_config.tokens = Some(required("tokens.txt")?);
         }
         id if id.contains("paraformer") || id.contains("funasr") => {
             config.model_config.paraformer = OfflineParaformerModelConfig {
-                model: required("model.int8.onnx").or_else(|_| required("model.onnx"))?,
+                model: Some(
+                    required("model.int8.onnx").or_else(|_| required("model.onnx"))?,
+                ),
                 ..Default::default()
             };
-            config.model_config.tokens = required("tokens.txt")?;
+            config.model_config.tokens = Some(required("tokens.txt")?);
         }
         other => {
             return Err(format!(
@@ -3766,7 +3776,8 @@ fn transcribe_wav_native(
             wav_path_buf
                 .to_str()
                 .ok_or_else(|| "WAV path is not valid UTF-8.".to_string())?,
-        );
+        )
+        .ok_or_else(|| format!("Failed to read WAV file: {}", wav_path_buf.display()))?;
         let stream = recognizer.create_stream();
         stream.accept_waveform(wav.sample_rate(), wav.samples());
         recognizer.decode(&stream);
@@ -7458,7 +7469,6 @@ fn run_acceleration_smoke_test_inner(
         &runtime.executable,
         &smoke_wav,
         performance,
-        false,
         &runtime.mode,
     );
 

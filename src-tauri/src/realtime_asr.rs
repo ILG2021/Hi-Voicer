@@ -100,24 +100,33 @@ fn recognizer_config(model_dir: &Path) -> Result<OfflineRecognizerConfig, String
 
     if sensevoice.exists() {
         config.model_config.sense_voice = OfflineSenseVoiceModelConfig {
-            model: required(sensevoice, "SenseVoice model")?,
+            model: Some(required(sensevoice, "SenseVoice model")?),
             use_itn: true,
             ..Default::default()
         };
-        config.model_config.tokens = required(model_dir.join("tokens.txt"), "tokens")?;
+        config.model_config.tokens = Some(required(model_dir.join("tokens.txt"), "tokens")?);
         config.model_config.num_threads = 4;
         return Ok(config);
     }
 
     if qwen_conv.exists() {
         config.model_config.qwen3_asr = OfflineQwen3ASRModelConfig {
-            conv_frontend: required(qwen_conv, "Qwen3-ASR conv frontend")?,
-            encoder: required(model_dir.join("encoder.int8.onnx"), "Qwen3-ASR encoder")?,
-            decoder: required(model_dir.join("decoder.int8.onnx"), "Qwen3-ASR decoder")?,
-            tokenizer: required(model_dir.join("tokenizer"), "Qwen3-ASR tokenizer")?,
+            conv_frontend: Some(required(qwen_conv, "Qwen3-ASR conv frontend")?),
+            encoder: Some(required(
+                model_dir.join("encoder.int8.onnx"),
+                "Qwen3-ASR encoder",
+            )?),
+            decoder: Some(required(
+                model_dir.join("decoder.int8.onnx"),
+                "Qwen3-ASR decoder",
+            )?),
+            tokenizer: Some(required(
+                model_dir.join("tokenizer"),
+                "Qwen3-ASR tokenizer",
+            )?),
             ..Default::default()
         };
-        config.model_config.tokens = required(model_dir.join("tokens.txt"), "tokens")?;
+        config.model_config.tokens = Some(required(model_dir.join("tokens.txt"), "tokens")?);
         config.model_config.num_threads = 3;
         return Ok(config);
     }
