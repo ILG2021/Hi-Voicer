@@ -9,6 +9,7 @@ log.txt
 .reference/
 .release-artifacts/
 src-tauri/resources/engines/
+src-tauri/resources/models/
 
 .tmp/
 .tmp-directml-models/

@@ -10,16 +10,22 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "check:offline": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-runtime-offline.ps1",
     "check:resources": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-bundled-resources.ps1",
-    "prepare:llama": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-llama-runtime.ps1",
     "prepare:sherpa": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-sherpa-runtime.ps1",
+    "prepare:ffmpeg": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-ffmpeg-runtime.ps1",
+    "prepare:models": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-offline-models.ps1",
+    "prepare:llama": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-llama-runtime.ps1 -Variant cpu",
+    "prepare:llama:cuda": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-llama-runtime.ps1 -Variant cuda",
+    "prepare:offline": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-offline-resources.ps1",
+    "package:offline": "npm run prepare:offline && npm run tauri -- build",
+    "package:cuda": "npm run prepare:offline && npm run prepare:llama:cuda && npm run tauri -- build",
     "preview": "vite preview",
     "test": "vitest run",
     "tauri": "tauri"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-shell": "^2.3.5",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

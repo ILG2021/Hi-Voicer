@@ -19,8 +19,7 @@ rustup default 1.96.0-x86_64-pc-windows-msvc
 rustup component add --toolchain 1.96.0-x86_64-pc-windows-msvc rustfmt
 
 npm ci
-npm run prepare:llama
-npm run prepare:sherpa
+npm run prepare:offline
 npm test
 npm run build
 cargo check --manifest-path src-tauri\Cargo.toml

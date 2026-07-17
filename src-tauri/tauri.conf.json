@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run check:resources && npm run build",
+    "beforeBuildCommand": "npm run check:offline && npm run check:resources && npm run build",
     "frontendDist": "../dist"
   },
   "app": {

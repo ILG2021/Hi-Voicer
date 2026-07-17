@@ -7,21 +7,7 @@ $archiveSha256 = "15D10EC7AF9A8DDCE310BABC293307AEFDD25204A78A0F15684ECEBFA72DF1
 $url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/$runtimeTag/$archiveName"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $targetBin = Join-Path $repoRoot "src-tauri\resources\engines\sherpa\$runtimeTag\$runtimeName\bin"
-$requiredFiles = @(
-  "sherpa-onnx-offline.exe",
-  "sherpa-onnx-offline-websocket-server.exe"
-)
-
-$ready = $true
-foreach ($file in $requiredFiles) {
-  if (-not (Test-Path -LiteralPath (Join-Path $targetBin $file))) {
-    $ready = $false
-  }
-}
-if ($ready) {
-  Write-Host "Minimal Sherpa-ONNX $runtimeTag CPU runtime is already prepared."
-  exit 0
-}
+$requiredFiles = @("sherpa-onnx-offline.exe")
 
 $archivePath = Join-Path $env:TEMP $archiveName
 $extractDir = Join-Path $env:TEMP "hi-voicer-sherpa-$runtimeTag"
@@ -41,6 +27,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $sourceBin = Join-Path $extractDir "$runtimeName\bin"
+if (Test-Path -LiteralPath $targetBin) {
+  Remove-Item -LiteralPath $targetBin -Recurse -Force
+}
 New-Item -ItemType Directory -Path $targetBin -Force | Out-Null
 foreach ($file in $requiredFiles) {
   $source = Join-Path $sourceBin $file

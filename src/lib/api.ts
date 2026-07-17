@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
-import { open as openUrl } from "@tauri-apps/plugin-shell";
 import type {
   AccelerationStatus,
   AccelerationSmokeTestResult,
@@ -9,8 +8,6 @@ import type {
   AudioProcessingOptions,
   AudioProcessingResult,
   AudioWaveformResult,
-  ModelInstallProgress,
-  ModelPreset,
   ModelValidationResult,
   DirectMlProbeResult,
   NativeAudioDiagnostics,
@@ -157,14 +154,6 @@ export async function prepareAudioPreview(audioPath: string): Promise<string> {
   });
 }
 
-export async function openExternalUrl(url: string): Promise<void> {
-  try {
-    await openUrl(url);
-  } catch {
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-}
-
 export async function openRecordingsFolder(): Promise<string> {
   return await invoke<string>("open_recordings_dir");
 }
@@ -210,37 +199,8 @@ export async function saveExistingFile(
   });
 }
 
-export async function installModel(model: ModelPreset): Promise<string> {
-  if (model.installKind === "engineRequired") {
-    throw new Error(model.engineNote);
-  }
-
-  return await invoke<string>("install_model", {
-    model: {
-      id: model.id,
-      name: model.name,
-      installKind: model.installKind,
-      downloadUrl: model.downloadUrl,
-      archiveRoot: model.archiveRoot,
-      modelFiles: (model.modelFiles ?? []).map((file) => ({
-        url: file.url,
-        path: file.path,
-        size: file.size,
-        sha256: file.sha256,
-      })),
-      sherpaArgs: model.sherpaArgs ?? "",
-    },
-  });
-}
-
-export async function listenModelInstallProgress(
-  handler: (progress: ModelInstallProgress) => void,
-): Promise<() => void> {
-  try {
-    return await listen<ModelInstallProgress>("model-install-progress", (event) => handler(event.payload));
-  } catch {
-    return () => {};
-  }
+export async function resolveBundledModelDir(modelId: string): Promise<string> {
+  return await invoke<string>("resolve_bundled_model_dir", { modelId });
 }
 
 export async function listenRecordingState(handler: (isRecording: boolean) => void): Promise<() => void> {
@@ -272,6 +232,19 @@ export async function listenTranscriptionResult(
 ): Promise<() => void> {
   try {
     return await listen<TranscribeFileResult>("transcription-result", (event) => handler(event.payload));
+  } catch {
+    return () => {};
+  }
+}
+
+export async function listenRealtimeTranscriptionSegment(
+  handler: (segment: import("../types").RealtimeTranscriptSegment) => void,
+): Promise<() => void> {
+  try {
+    return await listen<import("../types").RealtimeTranscriptSegment>(
+      "realtime-transcription-segment",
+      (event) => handler(event.payload),
+    );
   } catch {
     return () => {};
   }
@@ -444,7 +417,7 @@ export async function transcribeFile(
 ): Promise<TranscribeFileResult> {
   const modelDir = settings.transcriptionModelDir || settings.modelDir;
   if (!modelDir) {
-    throw new Error("请先在设置里下载并配置离线模型。");
+    throw new Error("内置离线模型缺失，请重新安装完整离线包或选择已有本地模型目录。");
   }
 
   return await invoke<TranscribeFileResult>("transcribe_file", {

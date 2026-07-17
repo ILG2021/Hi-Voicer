@@ -15,7 +15,7 @@ export type AccelerationMode = "cpu" | "directml";
 export type ExportFormat = "plainText" | "timelineText" | "timelineTxt" | "srt" | "resolveMarkers";
 export type ThemeMode = "light" | "dark";
 export type TranscriptionPerformanceMode = "stable" | "balanced" | "fast";
-export type TimelineKind = "estimated" | "model";
+export type TimelineKind = "estimated" | "model" | "vad";
 export type AudioProcessingPreset = "normalize" | "trimSilence" | "voiceBasic" | "humReduction" | "lowHighPass";
 export type AudioOutputFormat = "wav" | "mp3" | "m4a" | "aac" | "flac" | "ogg" | "opus";
 export type AudioMergeMode = "copy" | "reencode";
@@ -102,25 +102,14 @@ export interface TranscriptHistoryItem {
 export interface ModelPreset {
   id: string;
   name: string;
-  family: "sherpa" | "whisper" | "funasr" | "qwen";
-  installKind: "sherpaOnnx" | "qwenGguf" | "engineRequired";
+  family: "sherpa" | "qwen";
+  roles: Array<"input" | "transcription">;
   size: string;
   quality: string;
   memory: string;
   recommendedFor: string;
   license: string;
-  downloadUrl: string;
   engineNote: string;
-  archiveRoot?: string;
-  modelFiles?: ModelFile[];
-  sherpaArgs?: string;
-}
-
-export interface ModelFile {
-  url: string;
-  path: string;
-  size?: number;
-  sha256?: string;
 }
 
 export interface TranscribeFileResult {
@@ -148,6 +137,13 @@ export interface SubtitleSegment {
   end: number;
   text: string;
   sourceAudioPath: string;
+}
+
+export interface RealtimeTranscriptSegment {
+  index: number;
+  start: number;
+  end: number;
+  text: string;
 }
 
 export interface AudioProcessingOptions {
@@ -258,13 +254,6 @@ export interface NativeAudioDiagnostics {
   ffmpegPath?: string | null;
   ffmpegDetail?: string | null;
   message: string;
-}
-
-export interface ModelInstallProgress {
-  modelId: string;
-  message: string;
-  completed: number;
-  total: number;
 }
 
 export interface DiagnosticItem {

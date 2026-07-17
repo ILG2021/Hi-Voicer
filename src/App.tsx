@@ -9,6 +9,7 @@ import {
   listenRecordingError,
   listenRecordingLevel,
   listenRecordingState,
+  listenRealtimeTranscriptionSegment,
   listenTranscriptionResult,
   openRecordingsFolder,
   requestMainRecordingToggle,
@@ -102,6 +103,7 @@ export default function App() {
   } | null>(null);
   const miniDragRef = useRef({ x: 0, y: 0, dragging: false });
   const settingsSaveVersionRef = useRef(0);
+  const realtimeTextRef = useRef("");
   const [modelValidation, setModelValidation] = useState<ModelValidationResult>({
     valid: false,
     modelName: "",
@@ -242,17 +244,25 @@ export default function App() {
 
   async function handleToggleRecording() {
     const isAudioOnly = settings.recordingMode === "audioOnly";
+    const isRealtime = !isAudioOnly && settings.recordingSource === "microphone";
     if (!isAudioOnly && !modelValidation.valid) {
-      setLastResult(modelValidation.message || "请先到设置里下载并配置离线模型。");
+      setLastResult(modelValidation.message || "内置离线模型缺失，请重新安装完整离线包或选择已有本地模型目录。");
       setCurrentPage("settings");
       return;
     }
 
     if (!isRecording) {
       try {
+        realtimeTextRef.current = "";
         await startRecording();
         setIsRecording(true);
-        setLastResult(isAudioOnly ? "正在纯录音，停止后会保存音频文件。" : "正在录音，停止后开始识别。");
+        setLastResult(
+          isAudioOnly
+            ? "正在纯录音，停止后会保存音频文件。"
+            : isRealtime
+              ? "正在实时识别，停顿后会立即输出文字。"
+              : "正在录音，停止后开始识别。",
+        );
       } catch (error) {
         setLastResult(error instanceof Error ? error.message : "录音启动失败。");
       }
@@ -261,7 +271,7 @@ export default function App() {
 
     try {
       setIsRecording(false);
-      setLastResult(isAudioOnly ? "正在保存录音..." : "正在识别...");
+      setLastResult(isAudioOnly ? "正在保存录音..." : isRealtime ? "正在完成最后一句..." : "正在识别...");
       const result = await stopRecording();
       setLastResult(result.text);
       appendTranscriptHistory(result);
@@ -275,11 +285,15 @@ export default function App() {
     let unlistenRecording = () => {};
     let unlistenRecordingError = () => {};
     let unlistenLevel = () => {};
+    let unlistenRealtimeResult = () => {};
     let unlistenResult = () => {};
     let unlistenMiniToggle = () => {};
 
     void listenRecordingState((nextIsRecording) => {
       if (!disposed) {
+        if (nextIsRecording) {
+          realtimeTextRef.current = "";
+        }
         setIsRecording(nextIsRecording);
       }
     }).then((unlisten) => {
@@ -297,6 +311,20 @@ export default function App() {
       unlistenLevel = unlisten;
       if (disposed) {
         unlistenLevel();
+      }
+    });
+
+    void listenRealtimeTranscriptionSegment((segment) => {
+      if (!disposed) {
+        realtimeTextRef.current = [realtimeTextRef.current, segment.text.trim()]
+          .filter(Boolean)
+          .join("\n");
+        setLastResult(realtimeTextRef.current);
+      }
+    }).then((unlisten) => {
+      unlistenRealtimeResult = unlisten;
+      if (disposed) {
+        unlistenRealtimeResult();
       }
     });
 
@@ -342,6 +370,7 @@ export default function App() {
       unlistenRecording();
       unlistenRecordingError();
       unlistenLevel();
+      unlistenRealtimeResult();
       unlistenResult();
       unlistenMiniToggle();
     };

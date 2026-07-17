@@ -1,11 +1,14 @@
 mod app_state;
 mod config;
+mod realtime_asr;
 
 use app_state::AppSnapshot;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use config::{HotwordRule, UserSettings};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use realtime_asr::{start_realtime_asr, RealtimeAsrResult, RealtimeAsrSession, RealtimePcmSender};
 use serde::{Deserialize, Serialize};
+
 use sha2::{Digest, Sha256};
 use std::{
     collections::{hash_map::DefaultHasher, HashMap, HashSet, VecDeque},
@@ -14,7 +17,7 @@ use std::{
     hash::{Hash, Hasher},
     io::BufWriter,
     io::{self, Read, Write},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
     path::{Component, Path, PathBuf},
     process::{Child, Command, Output, Stdio},
     sync::{mpsc, Arc, Mutex},
@@ -28,7 +31,6 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutEvent, ShortcutState};
 
-const SHERPA_DAEMON_PORT: u16 = 6127;
 const LLAMA_RUNTIME_TAG: &str = "b9964";
 const LLAMA_SERVER_IDLE_SECONDS: u64 = 300;
 const LLAMA_SERVER_START_TIMEOUT_SECONDS: u64 = 30;
@@ -36,8 +38,6 @@ const LLAMA_ASR_CHUNK_SECONDS: u32 = 60;
 const LLAMA_ASR_MAX_TOKENS: usize = 512;
 const QWEN_GGUF_MODEL_FILE: &str = "Qwen3-ASR-0.6B-Q8_0.gguf";
 const QWEN_GGUF_MMPROJ_FILE: &str = "mmproj-Qwen3-ASR-0.6B-Q8_0.gguf";
-const SHERPA_WEBSOCKET_DAEMON_ENABLED: bool = true;
-const SHERPA_WEBSOCKET_KEY: &str = "dGhlIHNhbXBsZSBub25jZQ==";
 const DAVINCI_TIMECODE_FPS: u64 = 25;
 const LONG_AUDIO_CHUNK_SECONDS: u32 = 60;
 const LONG_AUDIO_THRESHOLD_SECONDS: f64 = 300.0;
@@ -49,17 +49,12 @@ const QWEN_SILENT_CHUNK_PEAK_THRESHOLD: f64 = 0.006;
 const MIN_RECORDING_SECONDS: f64 = 0.05;
 const SHERPA_RUNTIME_TAG: &str = "v1.13.2";
 const SHERPA_CPU_RUNTIME_NAME: &str = "sherpa-onnx-v1.13.2-win-x64-static-MT-Release-no-tts";
-const SHERPA_CPU_ARCHIVE_NAME: &str =
-    "sherpa-onnx-v1.13.2-win-x64-static-MT-Release-no-tts.tar.bz2";
-const SHERPA_CPU_RUNTIME_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.2/sherpa-onnx-v1.13.2-win-x64-static-MT-Release-no-tts.tar.bz2";
 
 struct RuntimeState {
     settings: Mutex<UserSettings>,
     recording: Mutex<Option<RecordingSession>>,
-    sherpa_daemon: Mutex<Option<SherpaDaemon>>,
     llama_daemon: Mutex<Option<LlamaDaemon>>,
     directml_sensevoice: Mutex<Option<DirectMlSenseVoiceRuntime>>,
-    sherpa_runtime_install: Mutex<()>,
     transcription_cancellations: Mutex<HashSet<String>>,
 }
 
@@ -68,6 +63,7 @@ struct RecordingSession {
     tracks: Vec<RecordingTrack>,
     path: PathBuf,
     paste_target_window: Option<PasteTargetWindow>,
+    realtime_asr: Option<RealtimeAsrSession>,
 }
 
 struct RecordingTrack {
@@ -80,14 +76,7 @@ struct StoppedRecording {
     source: String,
     primary_path: PathBuf,
     output_paths: Vec<PathBuf>,
-}
-
-struct SherpaDaemon {
-    child: Child,
-    model_dir: String,
-    executable: String,
-    sherpa_threads: usize,
-    runtime_mode: String,
+    realtime_asr: Option<RealtimeAsrResult>,
 }
 
 struct LlamaDaemon {
@@ -106,13 +95,6 @@ struct DirectMlSenseVoiceRuntime {
     pieces: Vec<String>,
     encoder_session: ort::session::Session,
     ctc_session: ort::session::Session,
-}
-
-impl Drop for SherpaDaemon {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 impl Drop for LlamaDaemon {
@@ -173,12 +155,42 @@ fn focus_paste_target_window(target_window: Option<PasteTargetWindow>) {
 fn paste_text_to_target_window(
     text: &str,
     target_window: Option<PasteTargetWindow>,
+    paste_mode: &str,
 ) -> Result<(), String> {
     use std::mem::size_of;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-        VIRTUAL_KEY, VK_CONTROL, VK_V,
+        KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_CONTROL, VK_V,
     };
+
+    focus_paste_target_window(target_window);
+
+    if paste_mode == "direct" {
+        let unicode_input = |unit: u16, flags: KEYBD_EVENT_FLAGS| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(0),
+                    wScan: unit,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        for units in text.encode_utf16().collect::<Vec<_>>().chunks(128) {
+            let mut inputs = Vec::with_capacity(units.len() * 2);
+            for unit in units {
+                inputs.push(unicode_input(*unit, KEYEVENTF_UNICODE));
+                inputs.push(unicode_input(*unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+            }
+            let sent = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
+            if sent != inputs.len() as u32 {
+                return Err("Direct text input failed.".to_string());
+            }
+        }
+        return Ok(());
+    }
 
     let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
     clipboard
@@ -186,7 +198,6 @@ fn paste_text_to_target_window(
         .map_err(|error| error.to_string())?;
     drop(clipboard);
     thread::sleep(clipboard_settle_delay(text));
-    focus_paste_target_window(target_window);
 
     fn key_input(key: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS) -> INPUT {
         INPUT {
@@ -222,6 +233,7 @@ fn paste_text_to_target_window(
 fn paste_text_to_target_window(
     _text: &str,
     _target_window: Option<PasteTargetWindow>,
+    _paste_mode: &str,
 ) -> Result<(), String> {
     Err("Automatic paste is only supported on Windows.".to_string())
 }
@@ -816,6 +828,32 @@ fn installed_model_from_dir(model_dir: &Path) -> Option<(String, String)> {
     Some((model_id, model_dir_text))
 }
 
+fn bundled_model_dir(app: &AppHandle, model_id: &str) -> Result<PathBuf, String> {
+    if !matches!(model_id, "sensevoice-small" | "qwen3-asr-0.6b") {
+        return Err(format!("Unknown bundled model: {model_id}"));
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join("models").join(model_id));
+    }
+    if let Ok(current_dir) = std::env::current_dir() {
+        candidates.push(
+            current_dir
+                .join("src-tauri")
+                .join("resources")
+                .join("models")
+                .join(model_id),
+        );
+        candidates.push(current_dir.join("resources").join("models").join(model_id));
+    }
+
+    candidates
+        .into_iter()
+        .find(|path| installed_model_from_dir(path).is_some())
+        .ok_or_else(|| format!("Bundled model is missing or invalid: {model_id}"))
+}
+
 fn discover_installed_model_in_models_dir(
     models_dir: &Path,
     preferred_model_id: &str,
@@ -889,6 +927,12 @@ fn bind_installed_model_if_available(
             settings.selected_model_id = model_id;
             settings.model_dir = model_dir;
         }
+        if settings.input_model_dir.trim().is_empty() {
+            settings.input_model_dir = settings.model_dir.clone();
+        }
+        if settings.transcription_model_dir.trim().is_empty() {
+            settings.transcription_model_dir = settings.model_dir.clone();
+        }
         return Ok(settings);
     }
 
@@ -896,6 +940,47 @@ fn bind_installed_model_if_available(
     {
         settings.selected_model_id = model_id;
         settings.model_dir = model_dir;
+    }
+
+    if !settings.model_dir.trim().is_empty() {
+        if settings.input_model_dir.trim().is_empty()
+            && settings.selected_model_id == settings.input_model_id
+        {
+            settings.input_model_dir = settings.model_dir.clone();
+        }
+        if settings.transcription_model_dir.trim().is_empty()
+            && settings.selected_model_id == settings.transcription_model_id
+        {
+            settings.transcription_model_dir = settings.model_dir.clone();
+        }
+    }
+
+    if settings.input_model_dir.trim().is_empty() {
+        if let Ok(path) = bundled_model_dir(app, &settings.input_model_id) {
+            settings.input_model_dir = path.to_string_lossy().to_string();
+        }
+    }
+    if !settings.input_model_dir.trim().is_empty() {
+        let engine_path = PathBuf::from(&settings.input_model_dir).join("engine.json");
+        let is_file_only_engine = fs::read_to_string(engine_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<InstalledEngineConfig>(&raw).ok())
+            .is_some_and(|engine| engine.engine == "llama-server");
+        if is_file_only_engine {
+            settings.input_model_id = "sensevoice-small".to_string();
+            settings.input_model_dir = bundled_model_dir(app, &settings.input_model_id)
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_default();
+        }
+    }
+    if settings.transcription_model_dir.trim().is_empty() {
+        if let Ok(path) = bundled_model_dir(app, &settings.transcription_model_id) {
+            settings.transcription_model_dir = path.to_string_lossy().to_string();
+        }
+    }
+    if settings.model_dir.trim().is_empty() && !settings.input_model_dir.trim().is_empty() {
+        settings.selected_model_id = settings.input_model_id.clone();
+        settings.model_dir = settings.input_model_dir.clone();
     }
 
     Ok(settings)
@@ -1470,13 +1555,6 @@ fn install_sherpa_runtime_archive(
         return Ok(executable);
     }
 
-    let state = app.try_state::<RuntimeState>();
-    let _install_guard = state
-        .as_ref()
-        .map(|state| state.sherpa_runtime_install.lock())
-        .transpose()
-        .map_err(|error| error.to_string())?;
-
     if executable.exists() {
         return Ok(executable);
     }
@@ -1526,15 +1604,6 @@ fn install_sherpa_runtime_archive(
     }
 
     Ok(executable)
-}
-
-fn install_sherpa_runtime(app: &AppHandle) -> Result<PathBuf, String> {
-    install_sherpa_runtime_archive(
-        app,
-        SHERPA_CPU_RUNTIME_NAME,
-        SHERPA_CPU_ARCHIVE_NAME,
-        SHERPA_CPU_RUNTIME_URL,
-    )
 }
 
 fn emit_model_install_progress(
@@ -1699,46 +1768,44 @@ fn llama_runtime_search_roots(
     executable_dir: Option<&Path>,
     current_dir: Option<&Path>,
 ) -> Vec<PathBuf> {
+    // Variants in priority order: cuda first, then cpu fallback
+    let variants = [
+        format!("{LLAMA_RUNTIME_TAG}-cuda"),
+        LLAMA_RUNTIME_TAG.to_string(),
+        format!("{LLAMA_RUNTIME_TAG}-cpu"),
+    ];
     let mut roots = Vec::new();
-    if let Some(resource_dir) = resource_dir {
-        roots.push(
-            resource_dir
-                .join("engines")
-                .join("llama")
-                .join(LLAMA_RUNTIME_TAG),
-        );
-    }
-    if let Some(executable_dir) = executable_dir {
-        roots.push(
-            executable_dir
-                .join("engines")
-                .join("llama")
-                .join(LLAMA_RUNTIME_TAG),
-        );
-        roots.push(
-            executable_dir
-                .join("resources")
-                .join("engines")
-                .join("llama")
-                .join(LLAMA_RUNTIME_TAG),
-        );
-    }
-    if let Some(current_dir) = current_dir {
-        roots.push(
-            current_dir
-                .join("src-tauri")
-                .join("resources")
-                .join("engines")
-                .join("llama")
-                .join(LLAMA_RUNTIME_TAG),
-        );
-        roots.push(
-            current_dir
-                .join("resources")
-                .join("engines")
-                .join("llama")
-                .join(LLAMA_RUNTIME_TAG),
-        );
+    for variant in &variants {
+        if let Some(resource_dir) = resource_dir {
+            roots.push(resource_dir.join("engines").join("llama").join(variant));
+        }
+        if let Some(executable_dir) = executable_dir {
+            roots.push(executable_dir.join("engines").join("llama").join(variant));
+            roots.push(
+                executable_dir
+                    .join("resources")
+                    .join("engines")
+                    .join("llama")
+                    .join(variant),
+            );
+        }
+        if let Some(current_dir) = current_dir {
+            roots.push(
+                current_dir
+                    .join("src-tauri")
+                    .join("resources")
+                    .join("engines")
+                    .join("llama")
+                    .join(variant),
+            );
+            roots.push(
+                current_dir
+                    .join("resources")
+                    .join("engines")
+                    .join("llama")
+                    .join(variant),
+            );
+        }
     }
     roots
 }
@@ -1833,8 +1900,7 @@ fn install_sherpa_model(app: AppHandle, model: ModelInstallRequest) -> Result<St
         0,
         total_steps,
     );
-    let executable =
-        resolve_sherpa_cpu_runtime(&app, None).or_else(|_| install_sherpa_runtime(&app))?;
+    let executable = resolve_sherpa_cpu_runtime(&app, None)?;
     emit_model_install_progress(
         &app,
         &model.id,
@@ -2678,98 +2744,6 @@ fn sherpa_cli_executable_for_engine(
     }
 }
 
-fn sherpa_websocket_server_path(engine: &InstalledEngineConfig, executable: &Path) -> PathBuf {
-    if is_sherpa_streaming_cli_model(engine) {
-        executable.with_file_name(if cfg!(windows) {
-            "sherpa-onnx-online-websocket-server.exe"
-        } else {
-            "sherpa-onnx-online-websocket-server"
-        })
-    } else {
-        executable.with_file_name(if cfg!(windows) {
-            "sherpa-onnx-offline-websocket-server.exe"
-        } else {
-            "sherpa-onnx-offline-websocket-server"
-        })
-    }
-}
-fn sherpa_daemon_supported_for_model(engine: &InstalledEngineConfig) -> bool {
-    engine.model_id == "qwen3-asr-0.6b"
-}
-
-fn sherpa_daemon_args(
-    engine: &InstalledEngineConfig,
-    sherpa_threads: usize,
-    runtime_mode: &str,
-) -> Result<Vec<String>, String> {
-    let mut args =
-        sherpa_args_for_engine_runtime(engine, Some(sherpa_threads.max(1)), runtime_mode)?;
-    args.push(format!("--port={SHERPA_DAEMON_PORT}"));
-    Ok(args)
-}
-
-fn ensure_sherpa_daemon_running(
-    app: &AppHandle,
-    engine: &InstalledEngineConfig,
-    executable: &Path,
-    sherpa_threads: usize,
-    runtime_mode: &str,
-) -> Result<(), String> {
-    let server_exe = sherpa_websocket_server_path(engine, executable);
-    if !server_exe.exists() {
-        return Err(
-            "Sherpa WebSocket server executable does not exist; fast mode cannot be enabled."
-                .to_string(),
-        );
-    }
-
-    let state = app.state::<RuntimeState>();
-    let mut daemon = state
-        .sherpa_daemon
-        .lock()
-        .map_err(|error| error.to_string())?;
-
-    if let Some(existing) = daemon.as_mut() {
-        let still_running = existing
-            .child
-            .try_wait()
-            .map_err(|error| error.to_string())?
-            .is_none();
-        let server_exe_text = server_exe.to_string_lossy().to_string();
-        if still_running
-            && existing.model_dir == engine.model_dir
-            && existing.executable == server_exe_text
-            && existing.sherpa_threads == sherpa_threads.max(1)
-            && existing.runtime_mode == runtime_mode
-        {
-            return Ok(());
-        }
-    }
-
-    *daemon = None;
-
-    let mut command = Command::new(&server_exe);
-    command.args(sherpa_daemon_args(engine, sherpa_threads, runtime_mode)?);
-    if let Some(parent) = server_exe.parent() {
-        command.current_dir(parent);
-    }
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    suppress_command_window(&mut command);
-
-    let child = command.spawn().map_err(|error| error.to_string())?;
-    *daemon = Some(SherpaDaemon {
-        child,
-        model_dir: engine.model_dir.clone(),
-        executable: server_exe.to_string_lossy().to_string(),
-        sherpa_threads: sherpa_threads.max(1),
-        runtime_mode: runtime_mode.to_string(),
-    });
-
-    Ok(())
-}
 
 fn llama_threads() -> usize {
     thread::available_parallelism()
@@ -2834,6 +2808,11 @@ fn ensure_llama_daemon_running(
     let model_dir = PathBuf::from(&engine.model_dir);
     let (model, mmproj) = qwen_gguf_model_paths(&model_dir)?;
     let port = available_loopback_port()?;
+    let gpu_layers = if executable_text.contains("cuda") || executable_text.contains("vulkan") {
+        Some(99usize)
+    } else {
+        None
+    };
     let mut command = Command::new(&executable);
     command
         .arg("--model")
@@ -2851,7 +2830,11 @@ fn ensure_llama_daemon_running(
         .arg("--parallel")
         .arg("1")
         .arg("--no-webui")
-        .arg("--no-warmup")
+        .arg("--no-warmup");
+    if let Some(layers) = gpu_layers {
+        command.arg("--gpu-layers").arg(layers.to_string());
+    }
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -2997,190 +2980,7 @@ fn start_llama_idle_monitor(app: AppHandle) {
     });
 }
 
-fn wav_to_sherpa_websocket_payload(wav_path: &Path) -> Result<Vec<u8>, String> {
-    let mut reader = hound::WavReader::open(wav_path).map_err(|error| error.to_string())?;
-    let spec = reader.spec();
-    if spec.bits_per_sample != 16 || spec.sample_format != hound::SampleFormat::Int {
-        return Err("Sherpa fast mode only supports 16-bit PCM WAV.".to_string());
-    }
 
-    let samples = reader
-        .samples::<i16>()
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    let audio_bytes = samples
-        .len()
-        .checked_mul(std::mem::size_of::<f32>())
-        .ok_or_else(|| "Audio is too large to send to the Sherpa service.".to_string())?;
-
-    let mut payload = Vec::with_capacity(8 + audio_bytes);
-    payload.extend_from_slice(&(spec.sample_rate as i32).to_le_bytes());
-    payload.extend_from_slice(&(audio_bytes as i32).to_le_bytes());
-    for sample in samples {
-        payload.extend_from_slice(&((sample as f32) / 32768.0).to_le_bytes());
-    }
-
-    Ok(payload)
-}
-
-fn websocket_frame(opcode: u8, payload: &[u8]) -> Vec<u8> {
-    const MASK: [u8; 4] = [0x12, 0x34, 0x56, 0x78];
-    let mut frame = Vec::with_capacity(payload.len() + 14);
-    frame.push(0x80 | (opcode & 0x0f));
-
-    if payload.len() <= 125 {
-        frame.push(0x80 | payload.len() as u8);
-    } else if payload.len() <= u16::MAX as usize {
-        frame.push(0x80 | 126);
-        frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
-    } else {
-        frame.push(0x80 | 127);
-        frame.extend_from_slice(&(payload.len() as u64).to_be_bytes());
-    }
-
-    frame.extend_from_slice(&MASK);
-    for (index, byte) in payload.iter().enumerate() {
-        frame.push(byte ^ MASK[index % MASK.len()]);
-    }
-
-    frame
-}
-
-fn decode_sherpa_websocket_text(bytes: &[u8]) -> String {
-    match String::from_utf8(bytes.to_vec()) {
-        Ok(text) => text,
-        Err(_) => {
-            let (text, _, _) = encoding_rs::GBK.decode(bytes);
-            text.into_owned()
-        }
-    }
-}
-fn read_websocket_message(stream: &mut TcpStream) -> Result<Vec<u8>, String> {
-    let mut message = Vec::new();
-
-    loop {
-        let mut header = [0u8; 2];
-        stream
-            .read_exact(&mut header)
-            .map_err(|error| error.to_string())?;
-        let fin = header[0] & 0x80 != 0;
-        let opcode = header[0] & 0x0f;
-        let masked = header[1] & 0x80 != 0;
-        let mut len = (header[1] & 0x7f) as u64;
-
-        if len == 126 {
-            let mut bytes = [0u8; 2];
-            stream
-                .read_exact(&mut bytes)
-                .map_err(|error| error.to_string())?;
-            len = u16::from_be_bytes(bytes) as u64;
-        } else if len == 127 {
-            let mut bytes = [0u8; 8];
-            stream
-                .read_exact(&mut bytes)
-                .map_err(|error| error.to_string())?;
-            len = u64::from_be_bytes(bytes);
-        }
-
-        let mut mask = [0u8; 4];
-        if masked {
-            stream
-                .read_exact(&mut mask)
-                .map_err(|error| error.to_string())?;
-        }
-
-        let mut payload = vec![0u8; len as usize];
-        stream
-            .read_exact(&mut payload)
-            .map_err(|error| error.to_string())?;
-        if masked {
-            for (index, byte) in payload.iter_mut().enumerate() {
-                *byte ^= mask[index % mask.len()];
-            }
-        }
-
-        match opcode {
-            0x0 | 0x1 | 0x2 => message.extend_from_slice(&payload),
-            0x8 => return Err("Sherpa WebSocket service closed the connection early.".to_string()),
-            _ => {}
-        }
-
-        if fin && !message.is_empty() {
-            return Ok(message);
-        }
-    }
-}
-
-fn transcribe_sherpa_wav_websocket(wav_path: &Path) -> Result<String, String> {
-    let duration = wav_duration_seconds(wav_path).unwrap_or(60.0);
-    let read_timeout = Duration::from_secs(((duration * 2.0) as u64 + 120).clamp(120, 14_400));
-    let write_timeout = Duration::from_secs(((duration / 5.0) as u64 + 120).clamp(120, 1_800));
-    let payload = wav_to_sherpa_websocket_payload(wav_path)?;
-    let mut last_error = String::new();
-
-    for _ in 0..60 {
-        match TcpStream::connect(("127.0.0.1", SHERPA_DAEMON_PORT)) {
-            Ok(mut stream) => {
-                stream
-                    .set_read_timeout(Some(read_timeout))
-                    .map_err(|error| error.to_string())?;
-                stream
-                    .set_write_timeout(Some(write_timeout))
-                    .map_err(|error| error.to_string())?;
-
-                let handshake = format!(
-                    "GET / HTTP/1.1\r\nHost: 127.0.0.1:{SHERPA_DAEMON_PORT}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {SHERPA_WEBSOCKET_KEY}\r\nSec-WebSocket-Version: 13\r\n\r\n"
-                );
-                stream
-                    .write_all(handshake.as_bytes())
-                    .map_err(|error| error.to_string())?;
-
-                let mut response = Vec::new();
-                let mut buffer = [0u8; 512];
-                loop {
-                    let read = stream
-                        .read(&mut buffer)
-                        .map_err(|error| error.to_string())?;
-                    if read == 0 {
-                        return Err("Sherpa WebSocket handshake failed.".to_string());
-                    }
-                    response.extend_from_slice(&buffer[..read]);
-                    if response.windows(4).any(|window| window == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-
-                let response_text = String::from_utf8_lossy(&response);
-                if !response_text.starts_with("HTTP/1.1 101")
-                    && !response_text.starts_with("HTTP/1.0 101")
-                {
-                    return Err(format!(
-                        "Sherpa WebSocket handshake failed: {response_text}"
-                    ));
-                }
-
-                for chunk in payload.chunks(10_240) {
-                    stream
-                        .write_all(&websocket_frame(0x2, chunk))
-                        .map_err(|error| error.to_string())?;
-                }
-                let response = read_websocket_message(&mut stream)?;
-                let _ = stream.write_all(&websocket_frame(0x1, b"Done"));
-                let response_text = decode_sherpa_websocket_text(&response);
-                let text = extract_transcription_text(&response_text);
-                return Ok(text);
-            }
-            Err(error) => {
-                last_error = error.to_string();
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
-    }
-
-    Err(format!(
-        "Sherpa WebSocket service is not ready: {last_error}"
-    ))
-}
 
 fn wav_duration_seconds(wav_path: &Path) -> Result<f64, String> {
     let reader = hound::WavReader::open(wav_path).map_err(|error| error.to_string())?;
@@ -3879,67 +3679,134 @@ fn transcribe_faster_whisper_wav(
     parse_faster_whisper_worker_output(&raw_json, duration)
 }
 
+/// Build an OfflineRecognizerConfig from an InstalledEngineConfig.
+/// Supports SenseVoice, Qwen3-ASR (ONNX), and Paraformer model families.
+fn build_native_recognizer_config(
+    engine: &InstalledEngineConfig,
+    num_threads: usize,
+) -> Result<sherpa_onnx::OfflineRecognizerConfig, String> {
+    use sherpa_onnx::{
+        OfflineParaformerModelConfig, OfflineQwen3ASRModelConfig, OfflineRecognizerConfig,
+        OfflineSenseVoiceModelConfig,
+    };
+
+    let model_dir = std::path::Path::new(&engine.model_dir);
+    let mut config = OfflineRecognizerConfig::default();
+    config.model_config.num_threads = num_threads as i32;
+
+    let required = |rel: &str| -> Result<String, String> {
+        let p = model_dir.join(rel);
+        if !p.exists() {
+            return Err(format!("Required model file missing: {}", p.display()));
+        }
+        p.to_str()
+            .map(str::to_string)
+            .ok_or_else(|| format!("Model path is not valid UTF-8: {}", p.display()))
+    };
+
+    match engine.model_id.as_str() {
+        "sensevoice-small" => {
+            config.model_config.sense_voice = OfflineSenseVoiceModelConfig {
+                model: required("model.int8.onnx").or_else(|_| required("model.onnx"))?,
+                use_itn: true,
+                ..Default::default()
+            };
+            config.model_config.tokens = required("tokens.txt")?;
+        }
+        "qwen3-asr-0.6b" => {
+            config.model_config.qwen3_asr = OfflineQwen3ASRModelConfig {
+                conv_frontend: required("conv_frontend.onnx")?,
+                encoder: required("encoder.int8.onnx")
+                    .or_else(|_| required("encoder.onnx"))?,
+                decoder: required("decoder.int8.onnx")
+                    .or_else(|_| required("decoder.onnx"))?,
+                tokenizer: model_dir
+                    .join("tokenizer")
+                    .to_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| "Qwen3-ASR tokenizer path is not valid UTF-8".to_string())?,
+                ..Default::default()
+            };
+            config.model_config.tokens = required("tokens.txt")?;
+        }
+        id if id.contains("paraformer") || id.contains("funasr") => {
+            config.model_config.paraformer = OfflineParaformerModelConfig {
+                model: required("model.int8.onnx").or_else(|_| required("model.onnx"))?,
+                ..Default::default()
+            };
+            config.model_config.tokens = required("tokens.txt")?;
+        }
+        other => {
+            return Err(format!(
+                "Unsupported model for native sherpa-onnx inference: {other}. \
+                 Supported: sensevoice-small, qwen3-asr-0.6b, *paraformer*, *funasr*."
+            ));
+        }
+    }
+
+    Ok(config)
+}
+
+/// Transcribe a 16 kHz mono WAV file in-process using the sherpa-onnx Rust crate.
+/// Panics inside the recognizer C++ bridge are caught by catch_unwind so the
+/// Tauri process does not crash.
+fn transcribe_wav_native(
+    engine: &InstalledEngineConfig,
+    wav_path: &Path,
+    num_threads: usize,
+) -> Result<String, String> {
+    let engine_clone = engine.clone();
+    let wav_path_buf = wav_path.to_path_buf();
+
+    let result = std::panic::catch_unwind(move || -> Result<String, String> {
+        let config = build_native_recognizer_config(&engine_clone, num_threads)?;
+        let recognizer = sherpa_onnx::OfflineRecognizer::create(&config)
+            .ok_or_else(|| "Failed to create sherpa-onnx OfflineRecognizer.".to_string())?;
+        let wav = sherpa_onnx::Wave::read(
+            wav_path_buf
+                .to_str()
+                .ok_or_else(|| "WAV path is not valid UTF-8.".to_string())?,
+        );
+        let stream = recognizer.create_stream();
+        stream.accept_waveform(wav.sample_rate(), wav.samples());
+        recognizer.decode(&stream);
+        let text = stream
+            .get_result()
+            .map(|r| r.text.trim().to_string())
+            .unwrap_or_default();
+        Ok(text)
+    });
+
+    match result {
+        Ok(inner) => inner,
+        Err(_) => Err("sherpa-onnx recognizer panicked during inference.".to_string()),
+    }
+}
+
+/// Transcribe using native sherpa-onnx in-process inference (CPU only).
+/// The `executable` and `runtime_mode` parameters are kept for API compatibility
+/// but are no longer used — inference runs inside the process.
 fn transcribe_sherpa_wav_cli(
-    executable: &Path,
+    _executable: &Path,
     engine: &InstalledEngineConfig,
     wav_path: &Path,
     sherpa_threads: usize,
-    runtime_mode: &str,
+    _runtime_mode: &str,
 ) -> Result<String, String> {
-    let mut command = Command::new(executable);
-    command.args(sherpa_args_for_engine_runtime(
-        engine,
-        Some(sherpa_threads),
-        runtime_mode,
-    )?);
-    command.arg(wav_path);
-    suppress_command_window(&mut command);
-
-    let duration = wav_duration_seconds(wav_path).unwrap_or(60.0);
-    let timeout = Duration::from_secs(((duration * 4.0) as u64 + 120).clamp(120, 14_400));
-    let output = run_command_with_timeout(&mut command, timeout, "Sherpa CLI transcription")?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{stdout}\n{stderr}");
-
-    if !output.status.success() {
-        return Err(format!("Sherpa transcription failed: {}", combined.trim()));
-    }
-
-    Ok(extract_transcription_text(&combined))
+    transcribe_wav_native(engine, wav_path, sherpa_threads)
 }
 
+
+
 fn transcribe_sherpa_wav_once(
-    app: &AppHandle,
+    _app: &AppHandle,
     engine: &InstalledEngineConfig,
     executable: &Path,
     wav_path: &Path,
     performance: TranscriptionPerformance,
-    allow_daemon: bool,
     runtime_mode: &str,
 ) -> Result<String, String> {
-    if allow_daemon && SHERPA_WEBSOCKET_DAEMON_ENABLED {
-        match ensure_sherpa_daemon_running(
-            app,
-            engine,
-            executable,
-            performance.sherpa_threads,
-            runtime_mode,
-        )
-        .and_then(|_| transcribe_sherpa_wav_websocket(wav_path))
-        {
-            Ok(text) if !text.trim().is_empty() => return Ok(text),
-            Ok(_) | Err(_) => {}
-        }
-    }
-
-    transcribe_sherpa_wav_cli(
-        executable,
-        engine,
-        wav_path,
-        performance.sherpa_threads,
-        runtime_mode,
-    )
+    transcribe_sherpa_wav_cli(executable, engine, wav_path, performance.sherpa_threads, runtime_mode)
 }
 
 fn transcribe_llama_wav(
@@ -3958,7 +3825,7 @@ fn transcribe_llama_wav(
             started_at,
             "transcribing",
             35,
-            "Running Qwen3-ASR GGUF on CPU".to_string(),
+        "Running Qwen3-ASR GGUF".to_string(),
             0,
             1,
         );
@@ -4067,7 +3934,6 @@ fn transcribe_sherpa_wav(
             executable,
             wav_path,
             performance,
-            sherpa_daemon_supported_for_model(engine),
             runtime_mode,
         )?;
         ensure_transcription_not_cancelled(app, task_id)?;
@@ -4155,7 +4021,6 @@ fn transcribe_sherpa_wav(
                     &executable,
                     &chunk.path,
                     performance,
-                    sherpa_daemon_supported_for_model(&engine),
                     &runtime_mode,
                 )
                 .map(|text| TranscriptTextChunk {
@@ -8184,12 +8049,64 @@ fn app_recordings_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(recordings_dir)
 }
 
+fn send_realtime_i16(
+    sender: &Option<RealtimePcmSender>,
+    data: &[i16],
+    channels: usize,
+    sample_rate: u32,
+) {
+    let Some(sender) = sender else { return };
+    let mono = data
+        .chunks(channels.max(1))
+        .map(|frame| {
+            frame.iter().map(|s| *s as f32 / i16::MAX as f32).sum::<f32>()
+                / frame.len().max(1) as f32
+        })
+        .collect();
+    let _ = sender.try_send(mono, sample_rate);
+}
+
+fn send_realtime_f32(
+    sender: &Option<RealtimePcmSender>,
+    data: &[f32],
+    channels: usize,
+    sample_rate: u32,
+) {
+    let Some(sender) = sender else { return };
+    let mono = data
+        .chunks(channels.max(1))
+        .map(|frame| frame.iter().copied().sum::<f32>() / frame.len().max(1) as f32)
+        .collect();
+    let _ = sender.try_send(mono, sample_rate);
+}
+
+fn send_realtime_u16(
+    sender: &Option<RealtimePcmSender>,
+    data: &[u16],
+    channels: usize,
+    sample_rate: u32,
+) {
+    let Some(sender) = sender else { return };
+    let mono = data
+        .chunks(channels.max(1))
+        .map(|frame| {
+            frame
+                .iter()
+                .map(|s| (*s as f32 - 32_768.0) / 32_768.0)
+                .sum::<f32>()
+                / frame.len().max(1) as f32
+        })
+        .collect();
+    let _ = sender.try_send(mono, sample_rate);
+}
+
 fn build_recording_track_for_device(
     app: &AppHandle,
     device: cpal::Device,
     supported_config: cpal::SupportedStreamConfig,
     _role: &str,
     file_prefix: &str,
+    realtime_sender: Option<RealtimePcmSender>,
 ) -> Result<RecordingTrack, String> {
     let sample_format = supported_config.sample_format();
     let stream_config: cpal::StreamConfig = supported_config.into();
@@ -8210,14 +8127,20 @@ fn build_recording_track_for_device(
         last_emit: Mutex::new(Instant::now() - Duration::from_millis(100)),
     });
     let err_fn = |error| eprintln!("audio input stream error: {error}");
+    let channels = stream_config.channels as usize;
+    let sample_rate = stream_config.sample_rate.0;
 
     let stream = match sample_format {
         cpal::SampleFormat::I16 => {
             let writer = Arc::clone(&writer);
             let level_emitter = Arc::clone(&level_emitter);
+            let realtime_sender = realtime_sender.clone();
             device.build_input_stream(
                 &stream_config,
-                move |data: &[i16], _| write_i16_samples(&writer, &level_emitter, data),
+                move |data: &[i16], _| {
+                    send_realtime_i16(&realtime_sender, data, channels, sample_rate);
+                    write_i16_samples(&writer, &level_emitter, data);
+                },
                 err_fn,
                 None,
             )
@@ -8225,9 +8148,13 @@ fn build_recording_track_for_device(
         cpal::SampleFormat::F32 => {
             let writer = Arc::clone(&writer);
             let level_emitter = Arc::clone(&level_emitter);
+            let realtime_sender = realtime_sender.clone();
             device.build_input_stream(
                 &stream_config,
-                move |data: &[f32], _| write_f32_samples(&writer, &level_emitter, data),
+                move |data: &[f32], _| {
+                    send_realtime_f32(&realtime_sender, data, channels, sample_rate);
+                    write_f32_samples(&writer, &level_emitter, data);
+                },
                 err_fn,
                 None,
             )
@@ -8235,9 +8162,13 @@ fn build_recording_track_for_device(
         cpal::SampleFormat::U16 => {
             let writer = Arc::clone(&writer);
             let level_emitter = Arc::clone(&level_emitter);
+            let realtime_sender = realtime_sender.clone();
             device.build_input_stream(
                 &stream_config,
-                move |data: &[u16], _| write_u16_samples(&writer, &level_emitter, data),
+                move |data: &[u16], _| {
+                    send_realtime_u16(&realtime_sender, data, channels, sample_rate);
+                    write_u16_samples(&writer, &level_emitter, data);
+                },
                 err_fn,
                 None,
             )
@@ -8254,7 +8185,10 @@ fn build_recording_track_for_device(
     })
 }
 
-fn start_microphone_recording_track(app: &AppHandle) -> Result<RecordingTrack, String> {
+fn start_microphone_recording_track(
+    app: &AppHandle,
+    realtime_sender: Option<RealtimePcmSender>,
+) -> Result<RecordingTrack, String> {
     let host = cpal::default_host();
     let device = host
         .default_input_device()
@@ -8262,7 +8196,14 @@ fn start_microphone_recording_track(app: &AppHandle) -> Result<RecordingTrack, S
     let supported_config = device
         .default_input_config()
         .map_err(|error| error.to_string())?;
-    build_recording_track_for_device(app, device, supported_config, "microphone", "voice")
+    build_recording_track_for_device(
+        app,
+        device,
+        supported_config,
+        "microphone",
+        "voice",
+        realtime_sender,
+    )
 }
 
 fn start_system_recording_track(app: &AppHandle) -> Result<RecordingTrack, String> {
@@ -8273,13 +8214,14 @@ fn start_system_recording_track(app: &AppHandle) -> Result<RecordingTrack, Strin
     let supported_config = device
         .default_output_config()
         .map_err(|error| error.to_string())?;
-    build_recording_track_for_device(app, device, supported_config, "system", "system").map_err(
+    build_recording_track_for_device(app, device, supported_config, "system", "system", None).map_err(
         |error| {
             format!(
                 "System audio loopback capture failed. Check Windows output device, exclusive-mode settings, and app audio permissions. Details: {error}"
             )
         },
     )
+
 }
 
 fn audio_config_detail(config: &cpal::SupportedStreamConfig) -> String {
@@ -8374,8 +8316,9 @@ fn native_audio_diagnostics(app: &AppHandle) -> NativeAudioDiagnostics {
 
 fn start_microphone_and_system_recording_tracks(
     app: &AppHandle,
+    realtime_sender: Option<RealtimePcmSender>,
 ) -> Result<Vec<RecordingTrack>, String> {
-    let microphone = start_microphone_recording_track(app)?;
+    let microphone = start_microphone_recording_track(app, realtime_sender)?;
     match start_system_recording_track(app) {
         Ok(system) => Ok(vec![microphone, system]),
         Err(error) => {
@@ -8386,11 +8329,19 @@ fn start_microphone_and_system_recording_tracks(
         }
     }
 }
-fn start_recording_session(app: &AppHandle, source: &str) -> Result<RecordingSession, String> {
+
+fn start_recording_session(
+    app: &AppHandle,
+    source: &str,
+    realtime_asr: Option<RealtimeAsrSession>,
+) -> Result<RecordingSession, String> {
+    let realtime_sender = realtime_asr.as_ref().map(RealtimeAsrSession::pcm_sender);
     let tracks = match source {
         "system" => vec![start_system_recording_track(app)?],
-        "microphoneAndSystem" => start_microphone_and_system_recording_tracks(app)?,
-        _ => vec![start_microphone_recording_track(app)?],
+        "microphoneAndSystem" => {
+            start_microphone_and_system_recording_tracks(app, realtime_sender)?
+        }
+        _ => vec![start_microphone_recording_track(app, realtime_sender)?],
     };
     let path = tracks
         .first()
@@ -8401,6 +8352,7 @@ fn start_recording_session(app: &AppHandle, source: &str) -> Result<RecordingSes
         tracks,
         path,
         paste_target_window: capture_paste_target_window(),
+        realtime_asr,
     })
 }
 
@@ -8464,6 +8416,7 @@ fn stop_recording_session(session: RecordingSession) -> Result<StoppedRecording,
         source,
         tracks,
         path,
+        realtime_asr,
         ..
     } = session;
     let mut output_paths = Vec::new();
@@ -8471,6 +8424,7 @@ fn stop_recording_session(session: RecordingSession) -> Result<StoppedRecording,
     for track in tracks {
         output_paths.push(stop_recording_track(track)?);
     }
+    let realtime_asr = realtime_asr.map(RealtimeAsrSession::finish).transpose()?;
 
     if let Err(error) = validate_recording_output_files(&output_paths) {
         for path in &output_paths {
@@ -8484,7 +8438,38 @@ fn stop_recording_session(session: RecordingSession) -> Result<StoppedRecording,
         source,
         primary_path,
         output_paths,
+        realtime_asr,
     })
+}
+
+fn realtime_vad_model_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join("models").join("silero_vad.onnx"));
+    }
+    if let Ok(current_dir) = std::env::current_dir() {
+        candidates.push(
+            current_dir
+                .join("src-tauri")
+                .join("resources")
+                .join("models")
+                .join("silero_vad.onnx"),
+        );
+    }
+    candidates
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "Silero VAD model was not found: {}",
+                candidates
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            )
+        })
 }
 
 fn start_recording_from_runtime(app: &AppHandle, state: &RuntimeState) -> Result<String, String> {
@@ -8492,12 +8477,33 @@ fn start_recording_from_runtime(app: &AppHandle, state: &RuntimeState) -> Result
     if recording.is_some() {
         return Err("Recording is already in progress.".to_string());
     }
-    let recording_source = {
+    let (recording_source, recording_mode, model_dir) = {
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
-        settings.recording_source.clone()
+        (
+            settings.recording_source.clone(),
+            settings.recording_mode.clone(),
+            if settings.input_model_dir.trim().is_empty() {
+                settings.model_dir.clone()
+            } else {
+                settings.input_model_dir.clone()
+            },
+        )
     };
 
-    let session = start_recording_session(app, &recording_source)?;
+    let realtime_asr = if recording_mode != "audioOnly" && recording_source == "microphone" {
+        if model_dir.trim().is_empty() {
+            return Err("Configure a local model before recording.".to_string());
+        }
+        Some(start_realtime_asr(
+            app.clone(),
+            PathBuf::from(model_dir),
+            realtime_vad_model_path(app)?,
+        )?)
+    } else {
+        None
+    };
+
+    let session = start_recording_session(app, &recording_source, realtime_asr)?;
     let path = session.path.to_string_lossy().to_string();
     *recording = Some(session);
     emit_recording_state(app, true, Some(path.clone()));
@@ -8614,6 +8620,23 @@ fn prepare_recording_audio(
     Ok(stopped.primary_path.clone())
 }
 
+fn reliable_realtime_chunks(realtime: RealtimeAsrResult) -> Option<Vec<TranscriptTextChunk>> {
+    if realtime.dropped_blocks > 0 || realtime.segments.is_empty() {
+        return None;
+    }
+    Some(
+        realtime
+            .segments
+            .into_iter()
+            .map(|segment| TranscriptTextChunk {
+                text: segment.text,
+                start: segment.start,
+                end: segment.end,
+            })
+            .collect(),
+    )
+}
+
 fn finish_recording_with_settings(
     app: AppHandle,
     session: RecordingSession,
@@ -8657,6 +8680,45 @@ fn finish_recording_with_settings(
         return Err("Download and configure an offline model in Settings first.".to_string());
     }
 
+    if let Some(transcript_chunks) = stopped
+        .realtime_asr
+        .take()
+        .and_then(reliable_realtime_chunks)
+    {
+        let request = TranscribeFileRequest {
+            audio_path: audio_path.to_string_lossy().to_string(),
+            model_dir: model_dir.clone(),
+            task_id: None,
+            performance_mode: "fast".to_string(),
+            acceleration_mode: "cpu".to_string(),
+            hotwords: settings.hotwords.clone(),
+            output_format: settings.export_format.clone(),
+            save_output: settings.save_recordings,
+        };
+        let mut result = finish_transcription_result(
+            &app,
+            &request,
+            Instant::now(),
+            &audio_path,
+            &audio_path,
+            transcript_chunks,
+            "Realtime recognition produced no text.",
+            "cpu",
+            false,
+        )?;
+        result.timeline_kind = "vad".to_string();
+
+        if paste {
+            paste_text_to_target_window(&result.text, paste_target_window, &settings.paste_mode)?;
+        }
+        if !settings.save_recordings {
+            for path in stopped.output_paths {
+                let _ = fs::remove_file(path);
+            }
+        }
+        return Ok(result);
+    }
+
     let result = transcribe_file_with_sherpa(
         app,
         TranscribeFileRequest {
@@ -8672,7 +8734,7 @@ fn finish_recording_with_settings(
     )?;
 
     if paste {
-        paste_text_to_target_window(&result.text, paste_target_window)?;
+        paste_text_to_target_window(&result.text, paste_target_window, &settings.paste_mode)?;
     }
 
     if !settings.save_recordings {
@@ -8790,9 +8852,6 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             "show" => show_main_window(app),
             "quit" => {
                 if let Some(state) = app.try_state::<RuntimeState>() {
-                    if let Ok(mut daemon) = state.sherpa_daemon.lock() {
-                        *daemon = None;
-                    }
                     if let Ok(mut daemon) = state.llama_daemon.lock() {
                         *daemon = None;
                     }
@@ -8850,21 +8909,6 @@ fn save_settings(
 }
 
 #[tauri::command]
-async fn install_model(app: AppHandle, model: ModelInstallRequest) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        if model.install_kind == "sherpaOnnx" {
-            install_sherpa_model(app, model)
-        } else if model.install_kind == "qwenGguf" {
-            install_qwen_gguf_model(app, model)
-        } else {
-            install_zip_model(app, model)
-        }
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
 async fn select_directory() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         Ok(rfd::FileDialog::new()
@@ -8873,6 +8917,13 @@ async fn select_directory() -> Result<Option<String>, String> {
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn resolve_bundled_model_dir(app: AppHandle, model_id: String) -> Result<String, String> {
+    Ok(bundled_model_dir(&app, model_id.trim())?
+        .to_string_lossy()
+        .to_string())
 }
 
 #[tauri::command]
@@ -10165,14 +10216,11 @@ async fn stop_recording(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_shell::init())
         .manage(RuntimeState {
             settings: Mutex::new(UserSettings::default()),
             recording: Mutex::new(None),
-            sherpa_daemon: Mutex::new(None),
             llama_daemon: Mutex::new(None),
             directml_sensevoice: Mutex::new(None),
-            sherpa_runtime_install: Mutex::new(()),
             transcription_cancellations: Mutex::new(HashSet::new()),
         })
         .setup(|app| {
@@ -10204,7 +10252,7 @@ pub fn run() {
             get_app_snapshot,
             load_settings,
             save_settings,
-            install_model,
+            resolve_bundled_model_dir,
             select_directory,
             select_audio_files,
             open_recordings_dir,
@@ -10411,23 +10459,6 @@ mod tests {
     }
 
     #[test]
-    fn qwen_sherpa_daemon_uses_selected_thread_count() {
-        let engine = InstalledEngineConfig {
-            engine: "sherpa-onnx".to_string(),
-            model_id: "qwen3-asr-0.6b".to_string(),
-            model_name: "Qwen3-ASR 0.6B".to_string(),
-            model_dir: String::new(),
-            executable: String::new(),
-            args: "--num-threads=6".to_string(),
-            required_files: Vec::new(),
-        };
-
-        let args = sherpa_daemon_args(&engine, 3, "cpu").expect("daemon args");
-        assert!(args.contains(&"--num-threads=3".to_string()));
-        assert!(args.contains(&format!("--port={SHERPA_DAEMON_PORT}")));
-    }
-
-    #[test]
     fn clipboard_settle_delay_scales_for_long_text() {
         let short_delay = clipboard_settle_delay("short");
         let long_delay = clipboard_settle_delay(&"长文本".repeat(800));
@@ -10536,6 +10567,40 @@ mod tests {
     }
 
     #[test]
+    fn accepts_complete_realtime_segments_as_timed_chunks() {
+        let chunks = reliable_realtime_chunks(RealtimeAsrResult {
+            segments: vec![realtime_asr::RealtimeTranscriptSegment {
+                index: 0,
+                start: 1.25,
+                end: 2.5,
+                text: "hello".to_string(),
+            }],
+            dropped_blocks: 0,
+        })
+        .expect("reliable realtime chunks");
+
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text, "hello");
+        assert_eq!(chunks[0].start, 1.25);
+        assert_eq!(chunks[0].end, 2.5);
+    }
+
+    #[test]
+    fn rejects_realtime_segments_when_audio_blocks_were_dropped() {
+        let chunks = reliable_realtime_chunks(RealtimeAsrResult {
+            segments: vec![realtime_asr::RealtimeTranscriptSegment {
+                index: 0,
+                start: 0.0,
+                end: 1.0,
+                text: "partial".to_string(),
+            }],
+            dropped_blocks: 1,
+        });
+
+        assert!(chunks.is_none());
+    }
+
+    #[test]
     fn transcribe_request_defaults_to_cpu_acceleration() {
         let request: TranscribeFileRequest =
             serde_json::from_str(r#"{"audioPath":"sample.wav","modelDir":"models/demo"}"#)
@@ -10578,8 +10643,6 @@ mod tests {
 
         assert!(directml_transcription_supported_for_model(&sensevoice));
         assert!(!directml_transcription_supported_for_model(&qwen));
-        assert!(!sherpa_daemon_supported_for_model(&sensevoice));
-        assert!(sherpa_daemon_supported_for_model(&qwen));
     }
     #[test]
     fn qwen_sherpa_uses_measured_thread_profile() {
@@ -11117,61 +11180,6 @@ mod tests {
     }
 
     #[test]
-    fn websocket_server_path_is_derived_from_selected_runtime() {
-        let engine = InstalledEngineConfig {
-            engine: "sherpa-onnx".to_string(),
-            model_id: "sensevoice-small".to_string(),
-            model_name: "sensevoice-small".to_string(),
-            model_dir: String::new(),
-            executable: String::new(),
-            args: String::new(),
-            required_files: Vec::new(),
-        };
-        let cpu_executable = PathBuf::from(
-            r"C:\HiVoicer\runtimes\sherpa-onnx-v1.13.2-win-x64-static-MT-Release-no-tts\bin\sherpa-onnx-offline.exe",
-        );
-        let cuda_executable = PathBuf::from(
-            r"C:\HiVoicer\runtimes\sherpa-onnx-v1.13.2-cuda-12.x-cudnn-9.x-win-x64-cuda\bin\sherpa-onnx-offline.exe",
-        );
-
-        let cpu_server = sherpa_websocket_server_path(&engine, &cpu_executable);
-        let cuda_server = sherpa_websocket_server_path(&engine, &cuda_executable);
-
-        assert_ne!(cpu_server, cuda_server);
-        assert!(cpu_server.to_string_lossy().contains("static-MT"));
-        assert!(cuda_server.to_string_lossy().contains("cuda-12.x"));
-        assert!(cpu_server
-            .to_string_lossy()
-            .contains("sherpa-onnx-offline-websocket-server.exe"));
-    }
-
-    #[test]
-    fn zipformer_uses_streaming_sherpa_cli_and_server() {
-        let engine = InstalledEngineConfig {
-            engine: "sherpa-onnx".to_string(),
-            model_id: "sherpa-zipformer-zh".to_string(),
-            model_name: "Sherpa Zipformer".to_string(),
-            model_dir: String::new(),
-            executable: String::new(),
-            args: String::new(),
-            required_files: Vec::new(),
-        };
-        let offline_executable = PathBuf::from(
-            r"C:\HiVoicer\runtimes\sherpa-onnx-v1.13.2-win-x64-static-MT-Release-no-tts\bin\sherpa-onnx-offline.exe",
-        );
-
-        let cli_executable = sherpa_cli_executable_for_engine(&engine, &offline_executable);
-        let server_executable = sherpa_websocket_server_path(&engine, &cli_executable);
-
-        assert!(cli_executable
-            .to_string_lossy()
-            .ends_with("sherpa-onnx.exe"));
-        assert!(server_executable
-            .to_string_lossy()
-            .ends_with("sherpa-onnx-online-websocket-server.exe"));
-    }
-
-    #[test]
     fn llm_asr_models_use_short_chunks() {
         let qwen = InstalledEngineConfig {
             engine: "sherpa-onnx".to_string(),
@@ -11463,47 +11471,7 @@ Elapsed seconds: 0.16
         assert_eq!(extract_transcription_text(output), "");
     }
 
-    #[test]
-    fn decodes_gbk_sherpa_websocket_json_text() {
-        let bytes = b"{\"text\":\"\xB9\xE3\xCE\xF7\"}";
-        let decoded = decode_sherpa_websocket_text(bytes);
 
-        assert_eq!(extract_transcription_text(&decoded), "广西");
-    }
-    #[test]
-    fn builds_masked_websocket_binary_frame() {
-        let frame = websocket_frame(0x2, b"abc");
-
-        assert_eq!(frame[0], 0x82);
-        assert_eq!(frame[1], 0x83);
-        assert_eq!(&frame[2..6], &[0x12, 0x34, 0x56, 0x78]);
-        assert_eq!(frame[6], b'a' ^ 0x12);
-        assert_eq!(frame[7], b'b' ^ 0x34);
-        assert_eq!(frame[8], b'c' ^ 0x56);
-    }
-
-    #[test]
-    fn builds_sherpa_websocket_payload_from_wav() {
-        let root = test_root("builds-sherpa-websocket-payload-from-wav");
-        let wav_path = root.join("sample.wav");
-        let spec = hound::WavSpec {
-            channels: 1,
-            sample_rate: 16000,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-        let mut writer = hound::WavWriter::create(&wav_path, spec).expect("create wav");
-        writer.write_sample(0i16).expect("write first sample");
-        writer.write_sample(16384i16).expect("write second sample");
-        writer.finalize().expect("finalize wav");
-
-        let payload = wav_to_sherpa_websocket_payload(&wav_path).expect("payload");
-
-        assert_eq!(&payload[0..4], &16000i32.to_le_bytes());
-        assert_eq!(&payload[4..8], &8i32.to_le_bytes());
-        assert_eq!(f32::from_le_bytes(payload[8..12].try_into().unwrap()), 0.0);
-        assert_eq!(f32::from_le_bytes(payload[12..16].try_into().unwrap()), 0.5);
-    }
 
     #[test]
     fn writes_plain_text_transcription_output() {

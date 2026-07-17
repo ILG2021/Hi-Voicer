@@ -1,9 +1,9 @@
-import { Check, Cpu, Download, FolderOpen, Gauge, Keyboard, Mic, MonitorSpeaker, Moon, Sun, Volume2 } from "lucide-react";
+import { Check, Cpu, FolderOpen, Gauge, Keyboard, Mic, MonitorSpeaker, Moon, Sun, Volume2 } from "lucide-react";
 import type { KeyboardEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { SettingRow } from "../components/SettingRow";
 import { modelPresets } from "../data/modelPresets";
-import { installModel, listenModelInstallProgress, openExternalUrl, selectDirectory } from "../lib/api";
+import { resolveBundledModelDir, selectDirectory } from "../lib/api";
 import type { ThemeMode, UserSettings } from "../types";
 
 type ModelRole = "input" | "transcription";
@@ -53,7 +53,6 @@ function formatShortcut(event: KeyboardEvent<HTMLButtonElement>) {
 export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChange }: SettingsPageProps) {
   const [isCapturingShortcut, setIsCapturingShortcut] = useState(false);
   const [modelMessage, setModelMessage] = useState("");
-  const [installingModelId, setInstallingModelId] = useState<string | null>(null);
   const [activeModelRole, setActiveModelRole] = useState<ModelRole>("input");
   const shortcutButtonRef = useRef<HTMLButtonElement>(null);
   const activeModelId =
@@ -64,28 +63,8 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
     activeModelRole === "input"
       ? settings.inputModelDir || settings.modelDir
       : settings.transcriptionModelDir || settings.modelDir;
-  const selectedModel = modelPresets.find((model) => model.id === activeModelId) ?? modelPresets[0];
-
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-
-    void listenModelInstallProgress((progress) => {
-      if (!disposed) {
-        setModelMessage(`${progress.message}（${progress.completed}/${progress.total}）`);
-      }
-    }).then((nextUnlisten) => {
-      unlisten = nextUnlisten;
-      if (disposed) {
-        unlisten();
-      }
-    });
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, []);
+  const availableModels = modelPresets.filter((model) => model.roles.includes(activeModelRole));
+  const selectedModel = availableModels.find((model) => model.id === activeModelId) ?? availableModels[0];
 
   async function handleSelectModelDir() {
     try {
@@ -106,55 +85,35 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
     }
   }
 
-  async function handleInstallSelectedModel() {
-    if (selectedModel.installKind === "engineRequired") {
-      setModelMessage(selectedModel.engineNote);
-      await openExternalUrl(selectedModel.downloadUrl);
-      return;
-    }
-
-    try {
-      setInstallingModelId(selectedModel.id);
-      setModelMessage(`正在下载并配置 ${selectedModel.name}，首次安装会比较慢，请不要关闭软件。`);
-      const modelDir = await installModel(selectedModel);
-      onSettingsChange(
-        activeModelRole === "input"
-          ? {
-              ...settings,
-              selectedModelId: selectedModel.id,
-              modelDir,
-              inputModelId: selectedModel.id,
-              inputModelDir: modelDir,
-            }
-          : {
-              ...settings,
-              selectedModelId: selectedModel.id,
-              modelDir,
-              transcriptionModelId: selectedModel.id,
-              transcriptionModelDir: modelDir,
-            },
-      );
-      setModelMessage(`已安装到 ${modelDir}`);
-    } catch (error) {
-      setModelMessage(error instanceof Error ? error.message : "模型安装失败。");
-    } finally {
-      setInstallingModelId(null);
-    }
-  }
-
   function updateTheme(theme: ThemeMode) {
     onSettingsChange({ ...settings, theme });
   }
 
-  function selectModelForActiveRole(modelId: string) {
-    onSettingsChange(
-      activeModelRole === "input"
-        ? { ...settings, selectedModelId: modelId, inputModelId: modelId }
-        : { ...settings, selectedModelId: modelId, transcriptionModelId: modelId },
-    );
+  async function selectModelForActiveRole(modelId: string) {
+    try {
+      const modelDir = await resolveBundledModelDir(modelId);
+      onSettingsChange(
+        activeModelRole === "input"
+          ? { ...settings, selectedModelId: modelId, modelDir, inputModelId: modelId, inputModelDir: modelDir }
+          : {
+              ...settings,
+              selectedModelId: modelId,
+              modelDir,
+              transcriptionModelId: modelId,
+              transcriptionModelDir: modelDir,
+            },
+      );
+      setModelMessage("已切换到安装包内置模型。");
+    } catch (error) {
+      setModelMessage(error instanceof Error ? error.message : "内置模型不可用。");
+    }
   }
 
   function syncSelectedModelToBoth() {
+    if (!selectedModel.roles.includes("input") || !selectedModel.roles.includes("transcription")) {
+      setModelMessage(`${selectedModel.name} 不支持语音输入，不能同步到两处。`);
+      return;
+    }
     onSettingsChange({
       ...settings,
       selectedModelId: selectedModel.id,
@@ -274,7 +233,7 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
         <div className="setting-heading">
           <div>
             <strong>离线模型</strong>
-            <p>先选一个预设模型，需要时一键下载。可自动配置的模型会直接放到本机固定目录。</p>
+            <p>默认模型已包含在安装包中，选择后直接在本机运行，不会发起公网下载。</p>
           </div>
           <button className="secondary-button" type="button" onClick={handleSelectModelDir}>
             <FolderOpen size={17} />
@@ -306,7 +265,7 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
         </div>
 
         <div className="model-grid">
-          {modelPresets.map((model) => {
+          {availableModels.map((model) => {
             const isSelected = model.id === selectedModel.id;
 
             return (
@@ -314,7 +273,7 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
                 className={`model-card ${isSelected ? "model-card--selected" : ""}`}
                 key={model.id}
                 type="button"
-                onClick={() => selectModelForActiveRole(model.id)}
+                onClick={() => void selectModelForActiveRole(model.id)}
               >
                 <span className="model-card__title">
                   {model.name}
@@ -325,13 +284,7 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
                 </span>
                 <span>{model.memory}</span>
                 <small>{model.recommendedFor}</small>
-                <em>
-                  {model.installKind === "engineRequired"
-                    ? "需要后续接入引擎"
-                    : model.installKind === "qwenGguf"
-                      ? "自动配置高效转录引擎"
-                      : "可自动配置 Sherpa"}
-                </em>
+                <em>随安装包提供，无需联网</em>
               </button>
             );
           })}
@@ -342,17 +295,6 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
             <span>当前模型目录</span>
             <strong>{settings.modelDir || "尚未选择"}</strong>
           </div>
-          <button
-            className="primary-button"
-            type="button"
-            disabled={installingModelId !== null}
-            onClick={() => void handleInstallSelectedModel()}
-          >
-            <Download size={17} />
-            {selectedModel.installKind === "engineRequired"
-              ? `查看 ${selectedModel.name}`
-              : `下载并配置 ${selectedModel.name}`}
-          </button>
         </div>
         <p className="model-message">
           当前用途：{activeModelRole === "input" ? "语音输入" : "文件转录"} / 目录：{activeModelDir || "未选择"}

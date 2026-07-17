@@ -14,10 +14,6 @@ FFmpeg is a third-party multimedia framework. The bundled Gyan Windows builds ar
 
 Hi-Voicer does not modify FFmpeg. `ffplay.exe` is not bundled.
 
-## llama.cpp
-
-Hi-Voicer includes the official `b9964` Windows CPU x64 runtime from llama.cpp for local Qwen3-ASR GGUF inference. llama.cpp is licensed under the MIT License. Project source and license information are available at https://github.com/ggml-org/llama.cpp.
-
 ## Sherpa-ONNX
 
-Hi-Voicer includes two static CPU executables from the official Sherpa-ONNX `v1.13.2` Windows release: `sherpa-onnx-offline.exe` and `sherpa-onnx-offline-websocket-server.exe`. Sherpa-ONNX is licensed under the Apache License 2.0. Project source and license information are available at https://github.com/k2-fsa/sherpa-onnx.
+Hi-Voicer uses Sherpa-ONNX `v1.13.2` for local SenseVoice, Qwen3-ASR and Silero VAD inference. Release packages include the official static Windows CPU executable and the Rust binding's CPU native library. Sherpa-ONNX is licensed under the Apache License 2.0. Project source and license information are available at https://github.com/k2-fsa/sherpa-onnx.
