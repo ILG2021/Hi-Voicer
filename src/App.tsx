@@ -507,7 +507,7 @@ export default function App() {
         />
       )}
       {currentPage === "diagnostics" && (
-        <DiagnosticsPage items={diagnostics} modelReady={modelValidation.valid} settings={settings} onSettingsChange={handleSettingsChange} />
+        <DiagnosticsPage items={diagnostics} modelReady={modelValidation.valid} settings={settings} />
       )}
     </AppShell>
   );

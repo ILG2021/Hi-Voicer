@@ -64,15 +64,12 @@ describe("SettingsPage", () => {
     expect(onSettingsChange).toHaveBeenCalledWith(expect.objectContaining({ theme: "dark" }));
   });
 
-  it("switches between CPU and experimental DirectML acceleration", () => {
+  it("offers only CPU acceleration", () => {
     const { onSettingsChange } = renderSettings();
     const cpuButton = screen.getByRole("button", { name: "CPU" });
-    const directMlButton = screen.getByRole("button", { name: /DirectML/ });
     expect(screen.queryByRole("button", { name: /CUDA/i })).toBeNull();
     fireEvent.click(cpuButton);
     expect(onSettingsChange).toHaveBeenCalledWith(expect.objectContaining({ accelerationMode: "cpu" }));
-    fireEvent.click(directMlButton);
-    expect(onSettingsChange).toHaveBeenCalledWith(expect.objectContaining({ accelerationMode: "directml" }));
   });
 
   it("toggles launch at startup", () => {

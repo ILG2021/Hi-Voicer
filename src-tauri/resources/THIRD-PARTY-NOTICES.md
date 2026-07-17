@@ -4,8 +4,6 @@ Hi-Voicer ships CPU-only local inference components and no bundled GPU runtime.
 
 CUDA support has been removed from the public product path because it requires NVIDIA-specific CUDA Toolkit and cuDNN dependencies that are difficult to distribute reliably for ordinary Windows users.
 
-DirectML acceleration is experimental and must be validated per machine with diagnostics and CPU comparison before it is treated as a reliable path.
-
 ## FFmpeg
 
 Hi-Voicer release packages include `ffmpeg.exe` and `ffprobe.exe` from the FFmpeg Windows release essentials builds provided by Gyan Doshi at https://www.gyan.dev/ffmpeg/builds/.

@@ -1,4 +1,4 @@
-import { Check, Cpu, FolderOpen, Gauge, Keyboard, Mic, MonitorSpeaker, Moon, Sun, Volume2 } from "lucide-react";
+import { Check, Cpu, FolderOpen, Keyboard, Mic, MonitorSpeaker, Moon, Sun, Volume2 } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import { useRef, useState } from "react";
 import { SettingRow } from "../components/SettingRow";
@@ -204,7 +204,7 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
         </div>
       </SettingRow>
 
-      <SettingRow label="识别加速" description="0.2.0 正式版使用 CPU 稳定路线；GPU 后续作为实验后端单独验证。">
+      <SettingRow label="识别加速" description="使用 Sherpa-ONNX CPU 稳定路线。">
         <div className="segmented-control" role="group" aria-label="识别加速">
           <button
             className={settings.accelerationMode === "cpu" ? "segment-button segment-button--active" : "segment-button"}
@@ -214,19 +214,7 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
             <Cpu size={16} />
             CPU
           </button>
-          <button
-            className={settings.accelerationMode === "directml" ? "segment-button segment-button--active" : "segment-button"}
-            type="button"
-            onClick={() => onSettingsChange({ ...settings, accelerationMode: "directml" })}
-          >
-            <Gauge size={16} />
-            {settings.directmlVerified ? "DirectML（已验证）" : "DirectML（实验）"}
-          </button>
-
         </div>
-        {settings.directmlVerified && settings.directmlVerifiedAt && (
-          <span className="setting-hint">本机验证时间：{new Date(settings.directmlVerifiedAt).toLocaleString()}</span>
-        )}
       </SettingRow>
 
       <div className="setting-row setting-row--stacked">

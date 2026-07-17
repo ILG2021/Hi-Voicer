@@ -11,7 +11,7 @@ export type AppPage = "home" | "transcription" | "subtitles" | "hotwords" | "aud
 export type PasteMode = "direct" | "clipboard";
 export type RecordingMode = "hold" | "toggle" | "audioOnly";
 export type RecordingSource = "microphone" | "system" | "microphoneAndSystem";
-export type AccelerationMode = "cpu" | "directml";
+export type AccelerationMode = "cpu";
 export type ExportFormat = "plainText" | "timelineText" | "timelineTxt" | "srt" | "resolveMarkers";
 export type ThemeMode = "light" | "dark";
 export type TranscriptionPerformanceMode = "stable" | "balanced" | "fast";
@@ -81,8 +81,6 @@ export interface UserSettings {
   recordingMode: RecordingMode;
   recordingSource: RecordingSource;
   accelerationMode: AccelerationMode;
-  directmlVerified: boolean;
-  directmlVerifiedAt?: string | null;
   hotwords: HotwordRule[];
   termCategories: TermCategory[];
   theme: ThemeMode;
@@ -207,40 +205,6 @@ export interface AccelerationSmokeTestResult {
   elapsedMs: number;
   transcriptPreview: string;
   message: string;
-}
-
-export interface DirectMlAdapterInfo {
-  name: string;
-  driverVersion?: string | null;
-  adapterRamMb?: number | null;
-  status?: string | null;
-}
-
-export interface DirectMlProbeResult {
-  directmlCandidate: boolean;
-  providerSessionReady: boolean;
-  providerSessionError?: string | null;
-  splitModelReady: boolean;
-  splitModelDir?: string | null;
-  splitModelMissingFiles: string[];
-  splitModelSessionReady: boolean;
-  splitModelSessionError?: string | null;
-  splitModelInputs: string[];
-  splitModelOutputs: string[];
-  modelReady: boolean;
-  directmlSessionReady: boolean;
-  directmlSessionError?: string | null;
-  onnxRuntimeBuild?: string | null;
-  modelInputs: string[];
-  modelOutputs: string[];
-  modelId?: string | null;
-  modelName?: string | null;
-  modelDir: string;
-  missingFiles: string[];
-  adapters: DirectMlAdapterInfo[];
-  elapsedMs: number;
-  message: string;
-  nextStep: string;
 }
 
 export interface NativeAudioDiagnostics {

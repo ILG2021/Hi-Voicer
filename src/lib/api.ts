@@ -9,7 +9,6 @@ import type {
   AudioProcessingResult,
   AudioWaveformResult,
   ModelValidationResult,
-  DirectMlProbeResult,
   NativeAudioDiagnostics,
   ProbeMediaFrameRateResult,
   TranscriptionPerformanceMode,
@@ -22,7 +21,7 @@ const STORAGE_KEY = "hi-voicer-settings";
 const pasteModes = ["direct", "clipboard"] as const;
 const recordingModes = ["hold", "toggle", "audioOnly"] as const;
 const recordingSources = ["microphone", "system", "microphoneAndSystem"] as const;
-const accelerationModes = ["cpu", "directml"] as const;
+const accelerationModes = ["cpu"] as const;
 const themeModes = ["light", "dark"] as const;
 
 function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -54,7 +53,6 @@ function normalizeSettings(defaultSettings: UserSettings, value: unknown): UserS
   const transcriptionModelDir = stringValue(settings.transcriptionModelDir, modelDir || defaultSettings.transcriptionModelDir);
   return {
     ...defaultSettings,
-    ...settings,
     shortcut: stringValue(settings.shortcut, defaultSettings.shortcut),
     selectedModelId,
     modelDir,
@@ -67,8 +65,6 @@ function normalizeSettings(defaultSettings: UserSettings, value: unknown): UserS
     recordingMode: enumValue(settings.recordingMode, recordingModes, defaultSettings.recordingMode),
     recordingSource: enumValue(settings.recordingSource, recordingSources, defaultSettings.recordingSource),
     accelerationMode: enumValue(settings.accelerationMode, accelerationModes, defaultSettings.accelerationMode),
-    directmlVerified: booleanValue(settings.directmlVerified, defaultSettings.directmlVerified),
-    directmlVerifiedAt: settings.directmlVerified ? stringValue(settings.directmlVerifiedAt, defaultSettings.directmlVerifiedAt ?? "") || null : null,
     hotwords: arrayValue(settings.hotwords, defaultSettings.hotwords),
     termCategories: arrayValue(settings.termCategories, defaultSettings.termCategories),
     theme: enumValue(settings.theme, themeModes, defaultSettings.theme),
@@ -344,44 +340,6 @@ export async function runAccelerationSmokeTest(settings: UserSettings): Promise<
       accelerationMode: settings.accelerationMode ?? "cpu",
     },
   });
-}
-
-export async function runDirectMlProbe(settings: UserSettings): Promise<DirectMlProbeResult> {
-  const modelDir = settings.transcriptionModelDir || settings.modelDir;
-  if (!modelDir) {
-    throw new Error("Configure SenseVoiceSmall before running the DirectML PoC probe.");
-  }
-
-  try {
-    return await invoke<DirectMlProbeResult>("run_directml_probe", { request: { modelDir } });
-  } catch (error) {
-    return {
-      directmlCandidate: false,
-      providerSessionReady: false,
-      providerSessionError: error instanceof Error ? error.message : "DirectML provider probe failed.",
-      splitModelReady: false,
-      splitModelDir: null,
-      splitModelMissingFiles: [],
-      splitModelSessionReady: false,
-      splitModelSessionError: error instanceof Error ? error.message : "DirectML split model probe failed.",
-      splitModelInputs: [],
-      splitModelOutputs: [],
-      modelReady: false,
-      directmlSessionReady: false,
-      directmlSessionError: error instanceof Error ? error.message : "DirectML PoC probe failed.",
-      onnxRuntimeBuild: null,
-      modelInputs: [],
-      modelOutputs: [],
-      modelId: null,
-      modelName: null,
-      modelDir,
-      missingFiles: [],
-      adapters: [],
-      elapsedMs: 0,
-      message: error instanceof Error ? error.message : "DirectML PoC probe failed.",
-      nextStep: "Keep using the stable CPU/Sherpa path.",
-    };
-  }
 }
 
 export async function getNativeAudioDiagnostics(): Promise<NativeAudioDiagnostics> {
