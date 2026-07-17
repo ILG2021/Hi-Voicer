@@ -101,7 +101,7 @@ if (-not $isCudaBundle) {
 }
 
 $totalBytes = (Get-ChildItem -Path $resourceRoot -Recurse -File | Measure-Object Length -Sum).Sum
-$maxBytes = 2GB
+$maxBytes = if ($isCudaBundle) { 3GB } else { 2GB }
 if ($totalBytes -gt $maxBytes) {
   throw "Bundled resources are too large: $([math]::Round($totalBytes / 1MB, 1)) MiB (limit: $([math]::Round($maxBytes / 1MB, 1)) MiB)."
 }
