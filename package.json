@@ -20,6 +20,9 @@
     "prepare:offline": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-offline-resources.ps1",
     "package:offline": "npm run prepare:offline && npm run tauri -- build",
     "package:cuda": "npm run prepare:offline && npm run prepare:llama:cuda && npm run tauri -- build",
+    "build:cpu": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-variants.ps1 -Variant cpu",
+    "build:cuda": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-variants.ps1 -Variant cuda",
+    "build:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-variants.ps1 -Variant both",
     "preview": "vite preview",
     "test": "vitest run",
     "tauri": "tauri"

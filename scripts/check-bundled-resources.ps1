@@ -3,16 +3,37 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $resourceRoot = Join-Path $repoRoot "src-tauri\resources"
-$cudaLlama = "engines\llama\b9964-cuda\llama-server.exe"
-$isCudaBundle = Test-Path -LiteralPath (Join-Path $resourceRoot $cudaLlama)
+
+# ── Determine variant: prefer explicit env var, fall back to auto-detect ──
+$buildVariant = $env:HIVOICER_BUILD_VARIANT
+if (-not $buildVariant) {
+  $cudaAutoDetect = Test-Path -LiteralPath (Join-Path $resourceRoot "engines\llama\b9964-cuda\llama-server.exe")
+  $buildVariant   = if ($cudaAutoDetect) { "cuda" } else { "cpu" }
+  Write-Host "HIVOICER_BUILD_VARIANT not set — auto-detected variant: $buildVariant" -ForegroundColor DarkYellow
+}
+$isCudaBundle = $buildVariant -eq "cuda"
+
+# ── Variant-specific llama required files ──
+$llamaRequiredFiles = if ($isCudaBundle) {
+  @(
+    "engines\llama\b9964-cuda\llama-server.exe",
+    "engines\llama\b9964-cuda\llama-server-impl.dll",
+    "engines\llama\b9964-cuda\llama-common.dll",
+    "engines\llama\b9964-cuda\llama.dll"
+  )
+} else {
+  @(
+    "engines\llama\b9964\llama-server.exe",
+    "engines\llama\b9964\llama-server-impl.dll",
+    "engines\llama\b9964\llama-common.dll",
+    "engines\llama\b9964\llama.dll"
+  )
+}
+
 $requiredFiles = @(
   "engines\ffmpeg\bin\ffmpeg.exe",
   "engines\ffmpeg\bin\ffprobe.exe",
   "engines\sherpa\v1.13.2\sherpa-onnx-v1.13.2-win-x64-static-MT-Release-no-tts\bin\sherpa-onnx-offline.exe",
-  "engines\llama\b9964\llama-server.exe",
-  "engines\llama\b9964\llama-server-impl.dll",
-  "engines\llama\b9964\llama-common.dll",
-  "engines\llama\b9964\llama.dll",
   "models\sensevoice-small\engine.json",
   "models\sensevoice-small\model.int8.onnx",
   "models\sensevoice-small\tokens.txt",
@@ -20,20 +41,22 @@ $requiredFiles = @(
   "models\qwen3-asr-0.6b\engine.json",
   "models\qwen3-asr-0.6b\Qwen3-ASR-0.6B-Q8_0.gguf",
   "models\qwen3-asr-0.6b\mmproj-Qwen3-ASR-0.6B-Q8_0.gguf"
-)
+) + $llamaRequiredFiles
 
+Write-Host "Checking bundled resources for [$buildVariant] variant..." -ForegroundColor Cyan
 foreach ($relativePath in $requiredFiles) {
   $path = Join-Path $resourceRoot $relativePath
   if (-not (Test-Path -LiteralPath $path)) {
     throw "Required bundled runtime file is missing: $relativePath"
   }
 }
+
 if ($isCudaBundle) {
-  $cudaDir = Split-Path -Parent (Join-Path $resourceRoot $cudaLlama)
+  $cudaDir = Join-Path $resourceRoot "engines\llama\b9964-cuda"
   $cudaBackend = Get-ChildItem -LiteralPath $cudaDir -Filter "*cuda*.dll" -File
   $cudaRuntime = Get-ChildItem -LiteralPath $cudaDir -Filter "*cudart*.dll" -File
   if (-not $cudaBackend -or -not $cudaRuntime) {
-    throw "CUDA bundle is missing its CUDA backend or CUDA runtime DLLs."
+    throw "CUDA bundle is missing its CUDA backend or CUDA runtime DLLs in: $cudaDir"
   }
 }
 
@@ -73,7 +96,7 @@ if (-not $isCudaBundle) {
   }
   if ($forbidden) {
     $paths = $forbidden.FullName | ForEach-Object { $_.Substring($resourceRoot.Length + 1) }
-    throw "GPU runtime files must not enter the CPU installer: $($paths -join ', ')"
+    throw "[CPU build] GPU runtime files must not enter the CPU installer: $($paths -join ', ')"
   }
 }
 
