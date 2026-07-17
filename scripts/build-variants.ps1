@@ -4,10 +4,9 @@
 
 .DESCRIPTION
   Orchestrates one or two Tauri NSIS builds, each with the correct
-  llama.cpp runtime bundled. Both variants share the same EXE format.
-  Finished installers are collected in dist-builds/.
+  llama.cpp runtime bundled. Finished installers are collected in dist-builds/.
 
-  CPU build  => Hi-Voicer_<version>_x64-setup.exe
+  CPU  build => Hi-Voicer_<version>_x64-setup.exe
   CUDA build => Hi-Voicer CUDA_<version>_x64-setup.exe
 
 .PARAMETER Variant
@@ -27,45 +26,44 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 
 Write-Host ""
-Write-Host "╔══════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "║     Hi-Voicer Multi-Variant Builder      ║" -ForegroundColor Cyan
-Write-Host "╚══════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "     Hi-Voicer Multi-Variant Builder      " -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# ──────────────────────────────────────────
+# ------------------------------------------
 #  Step 1: Common resources (download once)
-# ──────────────────────────────────────────
-Write-Host "▶ Verifying offline policy..." -ForegroundColor Yellow
+# ------------------------------------------
+Write-Host "[*] Verifying offline policy..." -ForegroundColor Yellow
 & (Join-Path $PSScriptRoot "check-runtime-offline.ps1")
 Write-Host ""
 
-Write-Host "▶ Preparing shared resources (ffmpeg, sherpa, models)..." -ForegroundColor Yellow
+Write-Host "[*] Preparing shared resources (ffmpeg, sherpa, models)..." -ForegroundColor Yellow
 & (Join-Path $PSScriptRoot "prepare-ffmpeg-runtime.ps1")
 & (Join-Path $PSScriptRoot "prepare-sherpa-runtime.ps1")
 & (Join-Path $PSScriptRoot "prepare-offline-models.ps1")
-Write-Host "✓ Shared resources ready." -ForegroundColor Green
+Write-Host "[OK] Shared resources ready." -ForegroundColor Green
 Write-Host ""
 
 # Output directory for final installers
 $outDir = Join-Path $root "dist-builds"
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
-# ──────────────────────────────────────────
+# ------------------------------------------
 #  Build function (one variant at a time)
-# ──────────────────────────────────────────
+# ------------------------------------------
 function Invoke-VariantBuild {
     param([string]$BuildVariant)
 
-    $productName  = if ($BuildVariant -eq "cuda") { "Hi-Voicer CUDA" } else { "Hi-Voicer" }
-    $variantLabel = $BuildVariant.ToUpper()
+    $productName     = if ($BuildVariant -eq "cuda") { "Hi-Voicer CUDA" } else { "Hi-Voicer" }
+    $variantLabel    = $BuildVariant.ToUpper()
     $llamaEnginesDir = Join-Path $root "src-tauri\resources\engines\llama"
 
-    Write-Host "┌──────────────────────────────────────────" -ForegroundColor Magenta
-    Write-Host "│  Building: $variantLabel  (productName: `"$productName`")" -ForegroundColor Magenta
-    Write-Host "└──────────────────────────────────────────" -ForegroundColor Magenta
+    Write-Host "------------------------------------------" -ForegroundColor Magenta
+    Write-Host "  Building: $variantLabel  (productName: $productName)" -ForegroundColor Magenta
+    Write-Host "------------------------------------------" -ForegroundColor Magenta
 
-    # ── 1. Remove the OTHER variant's llama dir so it is not bundled ──
-    #        (avoids doubling installer size when both dirs exist)
+    # -- 1. Remove the OTHER variant's llama dir to avoid bundling both --
     if ($BuildVariant -eq "cuda") {
         $otherDir = Join-Path $llamaEnginesDir "b9964"
         if (Test-Path -LiteralPath $otherDir) {
@@ -80,18 +78,17 @@ function Invoke-VariantBuild {
         }
     }
 
-    # ── 2. Download / verify the correct llama runtime ──
-    Write-Host "▶ Preparing llama.cpp [$BuildVariant] runtime..." -ForegroundColor Yellow
+    # -- 2. Download / verify the correct llama runtime --
+    Write-Host "[*] Preparing llama.cpp [$BuildVariant] runtime..." -ForegroundColor Yellow
     & (Join-Path $PSScriptRoot "prepare-llama-runtime.ps1") -Variant $BuildVariant
     Write-Host ""
 
-    # ── 3. Export env var so check-bundled-resources.ps1 knows the variant ──
+    # -- 3. Export env var so check-bundled-resources.ps1 knows the variant --
     $env:HIVOICER_BUILD_VARIANT = $BuildVariant
 
-    # ── 4. Run Tauri build, overriding productName via --config ──
-    #        (tauri.conf.json stays untouched on disk)
-    $configJson = "{`"productName`":`"$productName`"}"
-    Write-Host "▶ Running tauri build [$variantLabel]..." -ForegroundColor Yellow
+    # -- 4. Run Tauri build, overriding productName via --config --
+    $configJson = '{"productName":"' + $productName + '"}'
+    Write-Host "[*] Running tauri build [$variantLabel]..." -ForegroundColor Yellow
 
     Push-Location $root
     try {
@@ -104,7 +101,7 @@ function Invoke-VariantBuild {
         $env:HIVOICER_BUILD_VARIANT = ""
     }
 
-    # ── 5. Locate the freshly built NSIS installer and copy to dist-builds/ ──
+    # -- 5. Locate the freshly built NSIS installer and copy to dist-builds/ --
     $nsisDir = Join-Path $root "src-tauri\target\release\bundle\nsis"
     $installer = Get-ChildItem -Path $nsisDir -Filter "*-setup.exe" -ErrorAction SilentlyContinue |
                  Sort-Object LastWriteTime -Descending |
@@ -116,27 +113,29 @@ function Invoke-VariantBuild {
 
     $destPath = Join-Path $outDir $installer.Name
     Copy-Item -LiteralPath $installer.FullName -Destination $destPath -Force
-    $sizeMB = [math]::Round($installer.Length / 1MB, 1)
-    Write-Host "✓ [$variantLabel] Installer saved: dist-builds\$($installer.Name) ($sizeMB MiB)" -ForegroundColor Green
+    $sizeMB   = [math]::Round($installer.Length / 1MB, 1)
+    $sizeText = "{0} MiB" -f $sizeMB
+    Write-Host ("[OK] [$variantLabel] Installer saved: dist-builds\{0} ({1})" -f $installer.Name, $sizeText) -ForegroundColor Green
     Write-Host ""
 }
 
-# ──────────────────────────────────────────
+# ------------------------------------------
 #  Run selected variant(s)
-# ──────────────────────────────────────────
+# ------------------------------------------
 $toBuild = if ($Variant -eq "both") { @("cpu", "cuda") } else { @($Variant) }
 foreach ($v in $toBuild) {
     Invoke-VariantBuild -BuildVariant $v
 }
 
-# ──────────────────────────────────────────
+# ------------------------------------------
 #  Summary
-# ──────────────────────────────────────────
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  All builds complete!  Artifacts in: dist-builds/" -ForegroundColor Cyan
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
+# ------------------------------------------
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "  All builds complete!  Artifacts: dist-builds/" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
 Get-ChildItem -Path $outDir -Filter "*.exe" | ForEach-Object {
-    $sizeMB = [math]::Round($_.Length / 1MB, 1)
-    Write-Host "  $($_.Name)  ($sizeMB MiB)" -ForegroundColor White
+    $sizeMB   = [math]::Round($_.Length / 1MB, 1)
+    $sizeText = "{0} MiB" -f $sizeMB
+    Write-Host ("  {0}  ({1})" -f $_.Name, $sizeText) -ForegroundColor White
 }
 Write-Host ""
