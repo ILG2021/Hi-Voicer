@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "hash-utils.ps1")
 
 # ──────────────────────────────────────────
 #  Release configuration
@@ -64,7 +65,7 @@ function Get-VerifiedZip {
     Write-Host "Downloading $archiveName ..."
     Invoke-WebRequest -Uri $Url -OutFile $archivePath
 
-    $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+    $actualHash = Get-FileSha256 -Path $archivePath
     if ($actualHash -ne $ExpectedSha256.ToUpper()) {
         throw "Checksum mismatch for $archiveName.`n  Expected: $ExpectedSha256`n  Got:      $actualHash"
     }

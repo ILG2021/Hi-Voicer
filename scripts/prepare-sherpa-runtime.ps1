@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "hash-utils.ps1")
 
 $runtimeTag = "v1.13.2"
 $runtimeName = "sherpa-onnx-v1.13.2-win-x64-static-MT-Release-no-tts"
@@ -12,7 +13,7 @@ $requiredFiles = @("sherpa-onnx-offline.exe")
 $archivePath = Join-Path $env:TEMP $archiveName
 $extractDir = Join-Path $env:TEMP "hi-voicer-sherpa-$runtimeTag"
 Invoke-WebRequest -Uri $url -OutFile $archivePath
-$actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+$actualHash = Get-FileSha256 -Path $archivePath
 if ($actualHash -ne $archiveSha256) {
   throw "Sherpa-ONNX archive checksum mismatch. Expected $archiveSha256, got $actualHash."
 }

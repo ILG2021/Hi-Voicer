@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "hash-utils.ps1")
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $modelsRoot = Join-Path $repoRoot "src-tauri\resources\models"
@@ -13,7 +14,7 @@ function Install-VerifiedFile {
   )
 
   if (Test-Path -LiteralPath $Destination) {
-    $existingHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
+    $existingHash = Get-FileSha256 -Path $Destination
     if ($existingHash -eq $Sha256) {
       Write-Host "Verified existing model file: $Destination"
       return
@@ -25,7 +26,7 @@ function Install-VerifiedFile {
   New-Item -ItemType Directory -Path $parent -Force | Out-Null
   $partial = "$Destination.download"
   Invoke-WebRequest -Uri $Url -OutFile $partial
-  $actualHash = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash
+  $actualHash = Get-FileSha256 -Path $partial
   if ($actualHash -ne $Sha256) {
     Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
     throw "Model checksum mismatch for $Url. Expected $Sha256, got $actualHash."

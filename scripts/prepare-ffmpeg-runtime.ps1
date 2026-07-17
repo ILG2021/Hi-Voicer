@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "hash-utils.ps1")
 
 $ffmpegVersion = "8.1.2"
 $archiveName = "ffmpeg-$ffmpegVersion-essentials_build.zip"
@@ -10,7 +11,7 @@ $archivePath = Join-Path $env:TEMP "hi-voicer-$archiveName"
 $extractDir = Join-Path $env:TEMP "hi-voicer-ffmpeg-$ffmpegVersion"
 
 Invoke-WebRequest -Uri $url -OutFile $archivePath
-$actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+$actualHash = Get-FileSha256 -Path $archivePath
 if ($actualHash -ne $archiveSha256) {
   throw "FFmpeg archive checksum mismatch. Expected $archiveSha256, got $actualHash."
 }

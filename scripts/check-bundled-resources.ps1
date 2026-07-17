@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "hash-utils.ps1")
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $resourceRoot = Join-Path $repoRoot "src-tauri\resources"
@@ -59,7 +60,7 @@ $verifiedFiles = @{
 }
 foreach ($entry in $verifiedFiles.GetEnumerator()) {
   $path = Join-Path $resourceRoot $entry.Key
-  $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+  $actualHash = Get-FileSha256 -Path $path
   if ($actualHash -ne $entry.Value) {
     throw "Bundled resource checksum mismatch: $($entry.Key). Expected $($entry.Value), got $actualHash."
   }
