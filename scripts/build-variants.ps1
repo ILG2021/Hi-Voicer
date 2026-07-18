@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  Builds CPU (NSIS) and/or CUDA (Inno Setup) installer variants for Hi-Voicer.
+  Builds CPU and/or CUDA (Inno Setup) installer variants for Hi-Voicer.
 
 .DESCRIPTION
-  CPU  variant => Tauri NSIS    => Hi-Voicer_<ver>_x64-setup.exe
+  CPU  variant => Inno Setup    => Hi-Voicer_<ver>_x64-setup.exe
   CUDA variant => Inno Setup    => Hi-Voicer CUDA_<ver>_x64-setup.exe
                   (full cudart bundled; no system CUDA Toolkit required)
 
@@ -105,12 +105,17 @@ $outDir = Join-Path $root "dist-builds"
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
 # ==========================================================
-#  CPU build  --  Tauri NSIS  (bundle is small enough)
+#  CPU build  --  Inno Setup  (handles large bundles)
 # ==========================================================
 function Invoke-CpuBuild {
     Write-Host "------------------------------------------" -ForegroundColor Magenta
-    Write-Host "  Building: CPU  (NSIS installer)" -ForegroundColor Magenta
+    Write-Host "  Building: CPU  (Inno Setup installer)" -ForegroundColor Magenta
     Write-Host "------------------------------------------" -ForegroundColor Magenta
+
+    Write-Host "[*] Locating Inno Setup..." -ForegroundColor Yellow
+    $iscc = Find-IsccPath
+    Write-Host "  Found: $iscc" -ForegroundColor DarkGray
+    Write-Host ""
 
     $llamaEnginesDir = Join-Path $root "src-tauri\resources\engines\llama"
 
@@ -126,28 +131,36 @@ function Invoke-CpuBuild {
     Write-Host ""
 
     $env:HIVOICER_BUILD_VARIANT = "cpu"
-    $tempConfig = Join-Path $env:TEMP "hivoicer-build-config-cpu.json"
-    @{ productName = "Hi-Voicer" } | ConvertTo-Json -Compress | Set-Content -Path $tempConfig -Encoding UTF8
-
     Push-Location $root
     try {
-        npm run tauri -- build --config $tempConfig
-        if ($LASTEXITCODE -ne 0) { throw "Tauri NSIS build failed (exit $LASTEXITCODE)" }
+        Write-Host "[*] Validating bundled resources..." -ForegroundColor Yellow
+        & (Join-Path $PSScriptRoot "check-bundled-resources.ps1")
+        if ($LASTEXITCODE -ne 0) { throw "check-bundled-resources.ps1 failed for CPU variant" }
+
+        Write-Host "[*] Building frontend..." -ForegroundColor Yellow
+        npm.cmd run build
+        if ($LASTEXITCODE -ne 0) { throw "Frontend build (npm run build) failed" }
+
+        Write-Host "[*] Compiling Rust binary (cargo build --release)..." -ForegroundColor Yellow
+        cargo build --release --manifest-path src-tauri/Cargo.toml
+        if ($LASTEXITCODE -ne 0) { throw "cargo build --release failed" }
+
+        Test-IssSourceFiles -SourceRoot $root
+
+        Write-Host "[*] Running Inno Setup (ISCC)..." -ForegroundColor Yellow
+        $issFile = Join-Path $PSScriptRoot "hivoicer.iss"
+        & $iscc "/O+" "/DAppVariantSuffix=" "/DAppVersion=$appVersion" $issFile
+        if ($LASTEXITCODE -ne 0) { throw "Inno Setup (ISCC) failed (exit $LASTEXITCODE)" }
     } finally {
         Pop-Location
-        Remove-Item -Path $tempConfig -ErrorAction SilentlyContinue
         $env:HIVOICER_BUILD_VARIANT = ""
     }
 
-    $nsisDir = Join-Path $root "src-tauri\target\release\bundle\nsis"
-    $installer = Get-ChildItem -Path $nsisDir -Filter "*-setup.exe" -ErrorAction SilentlyContinue |
-                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $installer) { throw "NSIS installer not found in: $nsisDir" }
-
-    $destPath = Join-Path $outDir $installer.Name
-    Copy-Item -LiteralPath $installer.FullName -Destination $destPath -Force
-    $sizeText = "{0} MiB" -f [math]::Round($installer.Length / 1MB, 1)
-    Write-Host ("[OK] [CPU] Installer saved: dist-builds\{0} ({1})" -f $installer.Name, $sizeText) -ForegroundColor Green
+    $installer = Join-Path $outDir ("Hi-Voicer_{0}_x64-setup.exe" -f $appVersion)
+    if (-not (Test-Path -LiteralPath $installer)) { throw "Inno Setup installer not found: $installer" }
+    $installerFile = Get-Item -LiteralPath $installer
+    $sizeText = "{0} MiB" -f [math]::Round($installerFile.Length / 1MB, 1)
+    Write-Host ("[OK] [CPU] Installer saved: dist-builds\{0} ({1})" -f (Split-Path $installer -Leaf), $sizeText) -ForegroundColor Green
     Write-Host ""
 }
 
