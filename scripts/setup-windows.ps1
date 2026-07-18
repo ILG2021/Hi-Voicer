@@ -18,7 +18,7 @@ rustup toolchain install 1.96.0-x86_64-pc-windows-msvc --profile minimal
 rustup default 1.96.0-x86_64-pc-windows-msvc
 rustup component add --toolchain 1.96.0-x86_64-pc-windows-msvc rustfmt
 
-npm ci
+npm install
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-offline-resources.ps1
 npm test
 npm run build
