@@ -74,7 +74,7 @@ Install-VerifiedFile `
 $paraformerConfig = @{
   engine        = "sherpa-onnx"
   modelId       = "sherpa-paraformer-zh"
-  modelName     = "Paraformer 中文"
+  modelName     = "Paraformer zh"
   modelDir      = ""
   executable    = ""
   args          = '--tokens="{modelDir}\tokens.txt" --paraformer-model="{modelDir}\model.int8.onnx" --num-threads=4'
