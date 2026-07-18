@@ -137,13 +137,11 @@ function Invoke-CpuBuild {
         & (Join-Path $PSScriptRoot "check-bundled-resources.ps1")
         if (-not $?) { throw "check-bundled-resources.ps1 failed for CPU variant" }
 
-        Write-Host "[*] Building frontend..." -ForegroundColor Yellow
-        npm.cmd run build
-        if ($LASTEXITCODE -ne 0) { throw "Frontend build (npm run build) failed" }
-
-        Write-Host "[*] Compiling Rust binary (cargo build --release)..." -ForegroundColor Yellow
-        cargo build --release --manifest-path src-tauri/Cargo.toml
-        if ($LASTEXITCODE -ne 0) { throw "cargo build --release failed" }
+        Write-Host "[*] Building Tauri production executable..." -ForegroundColor Yellow
+        # Do not call cargo directly: the Tauri CLI passes the production
+        # config to tauri-build and embeds frontendDist into the executable.
+        npm.cmd run tauri -- build --no-bundle
+        if ($LASTEXITCODE -ne 0) { throw "Tauri production build failed" }
 
         Test-IssSourceFiles -SourceRoot $root
 
@@ -193,18 +191,13 @@ function Invoke-CudaBuild {
     if (-not $?) { throw "check-bundled-resources.ps1 failed for CUDA variant" }
     Write-Host ""
 
-    # -- 6. Build frontend --
-    Write-Host "[*] Building frontend..." -ForegroundColor Yellow
-    npm run build
-    if ($LASTEXITCODE -ne 0) { throw "Frontend build (npm run build) failed" }
-    Write-Host ""
-
-    # -- 7. Compile Rust binary (embeds built frontend from dist/) --
-    Write-Host "[*] Compiling Rust binary (cargo build --release)..." -ForegroundColor Yellow
+    # -- 6. Build the production executable through Tauri CLI. The CLI also
+    #    runs beforeBuildCommand, which builds and embeds frontendDist. --
+    Write-Host "[*] Building Tauri production executable..." -ForegroundColor Yellow
     Push-Location $root
     try {
-        cargo build --release --manifest-path src-tauri/Cargo.toml
-        if ($LASTEXITCODE -ne 0) { throw "cargo build --release failed" }
+        npm.cmd run tauri -- build --no-bundle
+        if ($LASTEXITCODE -ne 0) { throw "Tauri production build failed" }
     } finally {
         Pop-Location
         $env:HIVOICER_BUILD_VARIANT = ""
