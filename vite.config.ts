@@ -16,6 +16,10 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    // Rust/Tauri owns this directory. Do not let Vite watch locked build DLLs.
+    watch: {
+      ignored: [/[\\/]src-tauri[\\/]/],
+    },
   },
   envPrefix: ["VITE_", "TAURI_"],
 });
