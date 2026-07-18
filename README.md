@@ -61,11 +61,6 @@ npm run setup
 
 该命令会准备 FFmpeg、Sherpa-ONNX 和 ASR 模型。资源准备完成后，日常开发不需要重复执行；只有资源版本变化时才需要重新运行。
 
-日常前端开发：
-
-```powershell
-npm run dev
-```
 
 运行 Tauri 桌面开发模式：
 
