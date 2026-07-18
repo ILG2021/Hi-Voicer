@@ -54,7 +54,7 @@ $paraformerBaseUrl = "https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-z
 Install-VerifiedFile `
   -Url "$paraformerBaseUrl/model.int8.onnx" `
   -Destination (Join-Path $paraformerDir "model.int8.onnx") `
-  -Sha256 "F36A0433BCF096BD6D6F11B80A3AC8BED110BDCA632FE0D731DF8D1A84475945"
+  -Sha256 "C3207EF14440AAC412A8478A39E232D46A5B877CDD801D0DD680554930B66F9E"
 Install-VerifiedFile `
   -Url "$paraformerBaseUrl/tokens.txt" `
   -Destination (Join-Path $paraformerDir "tokens.txt") `
