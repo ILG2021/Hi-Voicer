@@ -135,7 +135,7 @@ function Invoke-CpuBuild {
     try {
         Write-Host "[*] Validating bundled resources..." -ForegroundColor Yellow
         & (Join-Path $PSScriptRoot "check-bundled-resources.ps1")
-        if ($LASTEXITCODE -ne 0) { throw "check-bundled-resources.ps1 failed for CPU variant" }
+        if (-not $?) { throw "check-bundled-resources.ps1 failed for CPU variant" }
 
         Write-Host "[*] Building frontend..." -ForegroundColor Yellow
         npm.cmd run build
@@ -190,7 +190,7 @@ function Invoke-CudaBuild {
     $env:HIVOICER_BUILD_VARIANT = "cuda"
     Write-Host "[*] Validating bundled resources..." -ForegroundColor Yellow
     & (Join-Path $PSScriptRoot "check-bundled-resources.ps1")
-    if ($LASTEXITCODE -ne 0) { throw "check-bundled-resources.ps1 failed for CUDA variant" }
+    if (-not $?) { throw "check-bundled-resources.ps1 failed for CUDA variant" }
     Write-Host ""
 
     # -- 6. Build frontend --
