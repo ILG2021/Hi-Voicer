@@ -36,9 +36,9 @@ export const initialHotwords: HotwordRule[] = [
 
 export const initialSettings: UserSettings = {
   shortcut: "CapsLock",
-  selectedModelId: "sensevoice-small",
+  selectedModelId: "sherpa-paraformer-zh",
   modelDir: "",
-  inputModelId: "sensevoice-small",
+  inputModelId: "sherpa-paraformer-zh",
   inputModelDir: "",
   transcriptionModelId: "qwen3-asr-0.6b",
   transcriptionModelDir: "",
@@ -52,7 +52,7 @@ export const initialSettings: UserSettings = {
   theme: "light",
   saveRecordings: false,
   launchAtStartup: false,
-  showMiniWindow: true,
+  showMiniWindow: false,
 };
 
 export const initialDiagnostics: DiagnosticItem[] = [
@@ -72,6 +72,6 @@ export const initialDiagnostics: DiagnosticItem[] = [
     id: "shortcut",
     label: "快捷键",
     status: "ok",
-    detail: "默认快捷键 CapsLock 可用于语音输入。",
+    detail: "默认快捷键 CapsLock 可用于实时录音。",
   },
 ];

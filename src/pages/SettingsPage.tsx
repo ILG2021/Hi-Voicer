@@ -109,23 +109,6 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
     }
   }
 
-  function syncSelectedModelToBoth() {
-    if (!selectedModel.roles.includes("input") || !selectedModel.roles.includes("transcription")) {
-      setModelMessage(`${selectedModel.name} 不支持语音输入，不能同步到两处。`);
-      return;
-    }
-    onSettingsChange({
-      ...settings,
-      selectedModelId: selectedModel.id,
-      modelDir: activeModelDir,
-      inputModelId: selectedModel.id,
-      inputModelDir: activeModelDir,
-      transcriptionModelId: selectedModel.id,
-      transcriptionModelDir: activeModelDir,
-    });
-    setModelMessage("已同步到语音输入和文件转录。");
-  }
-
   return (
     <section className="panel settings-panel">
       <p className="section-label">设置</p>
@@ -175,7 +158,7 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
         </button>
       </SettingRow>
 
-      <SettingRow label="录制来源" description="麦克风适合语音输入；系统声音适合会议、网课和播放器；双来源会优先保存双轨。">
+      <SettingRow label="录制来源" description="麦克风适合实时录音；系统声音适合会议、网课和播放器；双来源会优先保存双轨。">
         <div className="segmented-control segmented-control--three" role="group" aria-label="录制来源">
           <button
             className={settings.recordingSource === "microphone" ? "segment-button segment-button--active" : "segment-button"}
@@ -236,7 +219,7 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
             onClick={() => setActiveModelRole("input")}
           >
             <Mic size={16} />
-            语音输入
+            实时录音
           </button>
           <button
             className={activeModelRole === "transcription" ? "segment-button segment-button--active" : "segment-button"}
@@ -245,10 +228,6 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
           >
             <Volume2 size={16} />
             文件转录
-          </button>
-          <button className="segment-button" type="button" onClick={syncSelectedModelToBoth}>
-            <Check size={16} />
-            同步到两处
           </button>
         </div>
 
@@ -285,7 +264,7 @@ export function SettingsPage({ settings, onOpenRecordingsFolder, onSettingsChang
           </div>
         </div>
         <p className="model-message">
-          当前用途：{activeModelRole === "input" ? "语音输入" : "文件转录"} / 目录：{activeModelDir || "未选择"}
+          当前用途：{activeModelRole === "input" ? "实时录音" : "文件转录"} / 目录：{activeModelDir || "未选择"}
         </p>
         {modelMessage && <p className="model-message">{modelMessage}</p>}
       </div>

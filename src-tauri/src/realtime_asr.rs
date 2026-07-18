@@ -1,6 +1,6 @@
 use serde::Serialize;
 use sherpa_onnx::{
-    LinearResampler, OfflineQwen3ASRModelConfig, OfflineRecognizer,
+    LinearResampler, OfflineParaformerModelConfig, OfflineQwen3ASRModelConfig, OfflineRecognizer,
     OfflineRecognizerConfig, OfflineSenseVoiceModelConfig, SileroVadModelConfig,
     VadModelConfig, VoiceActivityDetector,
 };
@@ -96,7 +96,18 @@ fn required(path: PathBuf, label: &str) -> Result<String, String> {
 fn recognizer_config(model_dir: &Path) -> Result<OfflineRecognizerConfig, String> {
     let mut config = OfflineRecognizerConfig::default();
     let sensevoice = model_dir.join("model.int8.onnx");
+    let paraformer_cmvn = model_dir.join("am.mvn");
     let qwen_conv = model_dir.join("conv_frontend.onnx");
+
+    if sensevoice.exists() && paraformer_cmvn.exists() {
+        config.model_config.paraformer = OfflineParaformerModelConfig {
+            model: Some(required(sensevoice, "Paraformer model")?),
+            ..Default::default()
+        };
+        config.model_config.tokens = Some(required(model_dir.join("tokens.txt"), "tokens")?);
+        config.model_config.num_threads = 4;
+        return Ok(config);
+    }
 
     if sensevoice.exists() {
         config.model_config.sense_voice = OfflineSenseVoiceModelConfig {
@@ -132,7 +143,7 @@ fn recognizer_config(model_dir: &Path) -> Result<OfflineRecognizerConfig, String
     }
 
     Err(format!(
-        "Realtime ASR supports SenseVoice or sherpa-onnx Qwen3-ASR model directories; no supported model was found in {}",
+        "Realtime ASR supports SenseVoice, Paraformer, or sherpa-onnx Qwen3-ASR model directories; no supported model was found in {}",
         model_dir.display()
     ))
 }

@@ -7058,7 +7058,7 @@ mod tests {
         .normalized();
 
         assert_eq!(settings.shortcut, "CapsLock");
-        assert_eq!(settings.selected_model_id, "sensevoice-small");
+        assert_eq!(settings.selected_model_id, "sherpa-paraformer-zh");
         assert_eq!(settings.paste_mode, "clipboard");
         assert_eq!(settings.recording_mode, "hold");
         assert_eq!(settings.recording_source, "microphone");

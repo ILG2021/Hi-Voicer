@@ -57,7 +57,7 @@ export function AppShell({ status, currentPage, onPageChange, children }: AppShe
         <header className="topbar">
           <div>
             <p className="eyebrow">本地离线模式</p>
-            <h1>中文语音输入与文件转录</h1>
+            <h1>中文实时录音与文件转录</h1>
           </div>
           <div className="topbar-status">
             <StatusBadge state={status.readiness} />

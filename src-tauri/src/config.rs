@@ -75,9 +75,9 @@ impl Default for UserSettings {
     fn default() -> Self {
         Self {
             shortcut: "CapsLock".to_string(),
-            selected_model_id: "sensevoice-small".to_string(),
+            selected_model_id: "sherpa-paraformer-zh".to_string(),
             model_dir: String::new(),
-            input_model_id: "sensevoice-small".to_string(),
+            input_model_id: "sherpa-paraformer-zh".to_string(),
             input_model_dir: String::new(),
             transcription_model_id: "qwen3-asr-0.6b".to_string(),
             transcription_model_dir: String::new(),
@@ -118,7 +118,7 @@ impl Default for UserSettings {
             theme: "light".to_string(),
             save_recordings: false,
             launch_at_startup: false,
-            show_mini_window: true,
+            show_mini_window: false,
         }
     }
 }

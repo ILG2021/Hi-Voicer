@@ -85,7 +85,7 @@ export function HomePage({
   return (
     <div className="page-grid page-grid--home">
       <section className="panel hero-panel">
-        <p className="section-label">语音输入</p>
+        <p className="section-label">实时录音</p>
         <h2>{isReady ? copy.title : "先完成模型配置"}</h2>
         <p>
           {copy.description} 当前快捷键：<strong>{status.shortcut}</strong>

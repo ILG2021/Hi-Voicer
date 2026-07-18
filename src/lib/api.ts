@@ -84,7 +84,7 @@ function saveFallbackSettings(settings: UserSettings): UserSettings {
     theme: "light",
     saveRecordings: false,
     launchAtStartup: false,
-    showMiniWindow: true,
+    showMiniWindow: false,
   };
 }
 

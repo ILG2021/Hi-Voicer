@@ -7,6 +7,7 @@ describe("offline model presets", () => {
       "sensevoice-small",
       "sherpa-paraformer-zh",
       "qwen3-asr-0.6b",
+      "qwen3-asr-0.6b",
     ]);
   });
 
@@ -22,6 +23,7 @@ describe("offline model presets", () => {
   it("only exposes realtime-compatible models for voice input", () => {
     expect(modelPresets.filter((model) => model.roles.includes("input")).map((model) => model.id)).toEqual([
       "sensevoice-small",
+      "sherpa-paraformer-zh",
     ]);
     expect(modelPresets.filter((model) => model.roles.includes("transcription")).map((model) => model.id)).toEqual([
       "sensevoice-small",
