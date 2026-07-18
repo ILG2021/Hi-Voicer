@@ -69,12 +69,6 @@ if ($isCudaBundle) {
   }
 }
 
-$tokensPath = Join-Path $resourceRoot "models\sensevoice-small\tokens.txt"
-$tokensBytes = (Get-Item -LiteralPath $tokensPath).Length
-if ($tokensBytes -lt 300KB -or $tokensBytes -gt 330KB) {
-  throw "SenseVoice tokens file has an unexpected size: $tokensBytes bytes."
-}
-
 $senseConfig = Get-Content -Raw -LiteralPath (Join-Path $resourceRoot "models\sensevoice-small\engine.json") | ConvertFrom-Json
 $qwenConfig = Get-Content -Raw -LiteralPath (Join-Path $resourceRoot "models\qwen3-asr-0.6b\engine.json") | ConvertFrom-Json
 $paraformerConfig = Get-Content -Raw -LiteralPath (Join-Path $resourceRoot "models\sherpa-paraformer-zh\engine.json") | ConvertFrom-Json
@@ -89,14 +83,8 @@ if ($paraformerConfig.engine -ne "sherpa-onnx" -or $paraformerConfig.modelId -ne
 }
 
 $verifiedFiles = @{
-  "models\sensevoice-small\model.int8.onnx" = "C71F0CE00BEC95B07744E116345E33D8CBBE08CEF896382CF907BF4B51A2CD51"
-  "models\sensevoice-small\tokens.txt" = "F449EB28DC567533D7FA59BE34E2ABCA8784F771850C78A47FB731A31429A1DC"
-  "models\sherpa-paraformer-zh\model.int8.onnx" = "F36A0433BCF096BD6D6F11B80A3AC8BED110BDCA632FE0D731DF8D1A84475945"
-  "models\sherpa-paraformer-zh\tokens.txt" = "59ABA8873A2ED1E122C25FEE421E25F283B63290EFBDE85C1F01A853D83CB6E6"
-  "models\sherpa-paraformer-zh\am.mvn" = "29B3C740A2C0CFC6B308126D31D7F265FA2BE74F3BB095CD2F143EA970896AE5"
-  "models\silero_vad.onnx" = "9E2449E1087496D8D4CABA907F23E0BD3F78D91FA552479BB9C23AC09CBB1FD6"
-  "models\qwen3-asr-0.6b\Qwen3-ASR-0.6B-Q8_0.gguf" = "BCA259818B50CA7C4C05E9BDB35A5DC04FA039653A6D6F3F0F331F96F6AA1971"
-  "models\qwen3-asr-0.6b\mmproj-Qwen3-ASR-0.6B-Q8_0.gguf" = "41A342B5E4C514E968CB756DE6CD1B7BE39EFF43C44C57A2EF5FC6522E36603D"
+  # Model files are intentionally not checksum-validated so users can bring
+  # their own compatible models without prepare/setup replacing them.
 }
 foreach ($entry in $verifiedFiles.GetEnumerator()) {
   $path = Join-Path $resourceRoot $entry.Key

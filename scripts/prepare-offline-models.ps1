@@ -16,6 +16,13 @@ function Install-VerifiedFile {
     [Parameter(Mandatory = $true)][string]$Sha256
   )
 
+  # Model files may be supplied by the user. Preserve any existing file and
+  # only download the bundled default when the destination is missing.
+  if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+    Write-Host "Using existing model file without checksum validation: $Destination"
+    return
+  }
+
   Save-VerifiedDownload -Url $Url -Destination $Destination -Sha256 $Sha256
 }
 
