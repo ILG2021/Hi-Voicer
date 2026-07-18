@@ -25,8 +25,6 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
-    menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, State, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutEvent, ShortcutState};
@@ -2898,6 +2896,17 @@ fn start_llama_idle_monitor(app: AppHandle) {
     });
 }
 
+fn stop_llama_daemon(app: &AppHandle) {
+    let Some(state) = app.try_state::<RuntimeState>() else {
+        return;
+    };
+    if let Ok(mut daemon) = state.llama_daemon.lock() {
+        // Replacing the daemon drops LlamaDaemon, which terminates the
+        // llama-server child and waits for it to exit.
+        *daemon = None;
+    }
+}
+
 
 
 fn wav_duration_seconds(wav_path: &Path) -> Result<f64, String> {
@@ -5374,60 +5383,6 @@ fn register_global_recording_shortcut(app: &AppHandle, shortcut: &str) -> Result
         .map_err(|error| error.to_string())
 }
 
-fn show_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
-}
-
-fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    let show_item = MenuItem::with_id(
-        app,
-        "show",
-        "\u{6253}\u{5f00} Hi-Voicer",
-        true,
-        None::<&str>,
-    )?;
-    let quit_item = MenuItem::with_id(app, "quit", "\u{9000}\u{51fa}", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
-    let Some(icon) = app.default_window_icon() else {
-        return Ok(());
-    };
-
-    TrayIconBuilder::new()
-        .tooltip("Hi-Voicer")
-        .icon(icon.clone())
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => show_main_window(app),
-            "quit" => {
-                if let Some(state) = app.try_state::<RuntimeState>() {
-                    if let Ok(mut daemon) = state.llama_daemon.lock() {
-                        *daemon = None;
-                    }
-                }
-                app.exit(0);
-            }
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                show_main_window(&tray.app_handle());
-            }
-        })
-        .build(app)?;
-
-    Ok(())
-}
-
 #[tauri::command]
 fn get_app_snapshot(state: State<'_, RuntimeState>) -> AppSnapshot {
     let settings = state.settings.lock().expect("settings mutex poisoned");
@@ -6768,7 +6723,6 @@ pub fn run() {
             apply_launch_at_startup(settings.launch_at_startup)?;
             apply_mini_window_visibility(&app.handle(), settings.show_mini_window);
             apply_wave_window_visibility(&app.handle(), false);
-            setup_tray(app)?;
             if let Err(error) =
                 register_global_recording_shortcut(&app.handle(), &settings.shortcut)
             {
@@ -6778,9 +6732,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            if let WindowEvent::CloseRequested { .. } = event {
+                stop_llama_daemon(&window.app_handle());
+                window.app_handle().exit(0);
             }
         })
         .invoke_handler(tauri::generate_handler![
