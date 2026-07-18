@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{hash_map::DefaultHasher, HashMap, HashSet, VecDeque},
+    collections::{hash_map::DefaultHasher, HashSet, VecDeque},
     fs,
     fs::{File, OpenOptions},
     hash::{Hash, Hasher},
@@ -2900,10 +2900,13 @@ fn stop_llama_daemon(app: &AppHandle) {
     let Some(state) = app.try_state::<RuntimeState>() else {
         return;
     };
-    if let Ok(mut daemon) = state.llama_daemon.lock() {
-        // Replacing the daemon drops LlamaDaemon, which terminates the
-        // llama-server child and waits for it to exit.
-        *daemon = None;
+    {
+        let daemon_result = state.llama_daemon.lock();
+        if let Ok(mut daemon) = daemon_result {
+            // Replacing the daemon drops LlamaDaemon, which terminates the
+            // llama-server child and waits for it to exit.
+            *daemon = None;
+        }
     }
 }
 
