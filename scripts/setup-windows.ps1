@@ -19,7 +19,7 @@ rustup default 1.96.0-x86_64-pc-windows-msvc
 rustup component add --toolchain 1.96.0-x86_64-pc-windows-msvc rustfmt
 
 npm ci
-npm run prepare:offline
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-offline-resources.ps1
 npm test
 npm run build
 cargo check --manifest-path src-tauri\Cargo.toml

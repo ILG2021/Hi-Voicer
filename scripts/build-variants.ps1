@@ -176,8 +176,8 @@ function Invoke-CudaBuild {
     # -- 5. Resource validation --
     $env:HIVOICER_BUILD_VARIANT = "cuda"
     Write-Host "[*] Validating bundled resources..." -ForegroundColor Yellow
-    npm run check:resources
-    if ($LASTEXITCODE -ne 0) { throw "check:resources failed for CUDA variant" }
+    & (Join-Path $PSScriptRoot "check-bundled-resources.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "check-bundled-resources.ps1 failed for CUDA variant" }
     Write-Host ""
 
     # -- 6. Build frontend --

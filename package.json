@@ -9,23 +9,15 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
-    "check:offline": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-runtime-offline.ps1",
-    "check:resources": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-bundled-resources.ps1",
-    "prepare:sherpa": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-sherpa-runtime.ps1",
-    "prepare:ffmpeg": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-ffmpeg-runtime.ps1",
-    "prepare:models": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-offline-models.ps1",
-    "prepare:llama": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-llama-runtime.ps1 -Variant cpu",
-    "prepare:llama:cuda": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-llama-runtime.ps1 -Variant cuda",
-    "prepare:offline": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-offline-resources.ps1",
-    "package:offline": "npm run prepare:offline && npm run tauri -- build",
-    "package:cuda": "npm run prepare:offline && npm run prepare:llama:cuda && npm run tauri -- build",
-    "build:cpu": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-variants.ps1 -Variant cpu",
-    "build:cuda": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-variants.ps1 -Variant cuda",
-    "build:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-variants.ps1 -Variant both",
     "preview": "vite preview",
+
+    "build": "tsc && vite build",
     "test": "vitest run",
-    "tauri": "tauri"
+    "tauri": "tauri",
+
+    "release:cpu": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-variants.ps1 -Variant cpu",
+    "release:cuda": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-variants.ps1 -Variant cuda",
+    "release:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-variants.ps1 -Variant both"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
