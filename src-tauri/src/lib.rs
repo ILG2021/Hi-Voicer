@@ -761,7 +761,7 @@ fn installed_model_from_dir(model_dir: &Path) -> Option<(String, String)> {
 }
 
 fn bundled_model_dir(app: &AppHandle, model_id: &str) -> Result<PathBuf, String> {
-    if !matches!(model_id, "sensevoice-small" | "qwen3-asr-0.6b") {
+    if !matches!(model_id, "sensevoice-small" | "sherpa-paraformer-zh" | "qwen3-asr-0.6b") {
         return Err(format!("Unknown bundled model: {model_id}"));
     }
 
@@ -3656,6 +3656,10 @@ fn build_native_recognizer_config(
             config.model_config.tokens = Some(required("tokens.txt")?);
         }
         id if id.contains("paraformer") || id.contains("funasr") => {
+            // Keep the CMVN file as part of the model package. The ONNX model
+            // itself is passed to Sherpa-ONNX, while am.mvn is required for a
+            // complete Paraformer distribution and validation.
+            required("am.mvn")?;
             config.model_config.paraformer = OfflineParaformerModelConfig {
                 model: Some(
                     required("model.int8.onnx").or_else(|_| required("model.onnx"))?,

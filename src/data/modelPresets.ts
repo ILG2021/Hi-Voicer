@@ -14,6 +14,18 @@ export const modelPresets: ModelPreset[] = [
     engineNote: "模型和 Sherpa-ONNX CPU 运行时均随安装包提供。",
   },
   {
+    id: "sherpa-paraformer-zh",
+    name: "Paraformer 中文",
+    family: "sherpa",
+    roles: ["transcription"],
+    size: "约 243 MB",
+    quality: "中文文件转写稳定，适合离线批量识别",
+    memory: "CPU 可运行",
+    recommendedFor: "中文文件转写",
+    license: "Apache 2.0 / sherpa-onnx Apache 2.0",
+    engineNote: "使用 Sherpa-ONNX CPU 推理，包含 model.int8.onnx、tokens.txt 和 am.mvn。",
+  },
+  {
     id: "qwen3-asr-0.6b",
     name: "Qwen3-ASR 0.6B 高效版",
     family: "qwen",

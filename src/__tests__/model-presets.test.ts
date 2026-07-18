@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { modelPresets } from "../data/modelPresets";
 
 describe("offline model presets", () => {
-  it("exposes only the two models bundled with the installer", () => {
+  it("exposes the bundled offline models", () => {
     expect(modelPresets.map((model) => model.id)).toEqual([
       "sensevoice-small",
+      "sherpa-paraformer-zh",
       "qwen3-asr-0.6b",
     ]);
   });
@@ -22,6 +23,10 @@ describe("offline model presets", () => {
     expect(modelPresets.filter((model) => model.roles.includes("input")).map((model) => model.id)).toEqual([
       "sensevoice-small",
     ]);
-    expect(modelPresets.find((model) => model.id === "qwen3-asr-0.6b")?.roles).toEqual(["transcription"]);
+    expect(modelPresets.filter((model) => model.roles.includes("transcription")).map((model) => model.id)).toEqual([
+      "sensevoice-small",
+      "sherpa-paraformer-zh",
+      "qwen3-asr-0.6b",
+    ]);
   });
 });

@@ -4,6 +4,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $modelsRoot = Join-Path $repoRoot "src-tauri\resources\models"
 $senseRevision = "2365baeacb507f821a0c8120fcee3d484dba7a07"
+$paraformerRevision = "888ddb4"
 $tokensSha256 = "F449EB28DC567533D7FA59BE34E2ABCA8784F771850C78A47FB731A31429A1DC"
 $vadSha256 = "9E2449E1087496D8D4CABA907F23E0BD3F78D91FA552479BB9C23AC09CBB1FD6"
 
@@ -45,6 +46,36 @@ $senseConfig = @{
 [IO.File]::WriteAllText(
   (Join-Path $senseDir "engine.json"),
   $senseConfig,
+  (New-Object Text.UTF8Encoding($false))
+)
+
+$paraformerDir = Join-Path $modelsRoot "sherpa-paraformer-zh"
+$paraformerBaseUrl = "https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-2023-09-14/resolve/$paraformerRevision"
+Install-VerifiedFile `
+  -Url "$paraformerBaseUrl/model.int8.onnx" `
+  -Destination (Join-Path $paraformerDir "model.int8.onnx") `
+  -Sha256 "F36A0433BCF096BD6D6F11B80A3AC8BED110BDCA632FE0D731DF8D1A84475945"
+Install-VerifiedFile `
+  -Url "$paraformerBaseUrl/tokens.txt" `
+  -Destination (Join-Path $paraformerDir "tokens.txt") `
+  -Sha256 "59ABA8873A2ED1E122C25FEE421E25F283B63290EFBDE85C1F01A853D83CB6E6"
+Install-VerifiedFile `
+  -Url "$paraformerBaseUrl/am.mvn" `
+  -Destination (Join-Path $paraformerDir "am.mvn") `
+  -Sha256 "29B3C740A2C0CFC6B308126D31D7F265FA2BE74F3BB095CD2F143EA970896AE5"
+
+$paraformerConfig = @{
+  engine        = "sherpa-onnx"
+  modelId       = "sherpa-paraformer-zh"
+  modelName     = "Paraformer 中文"
+  modelDir      = ""
+  executable    = ""
+  args          = '--tokens="{modelDir}\tokens.txt" --paraformer-model="{modelDir}\model.int8.onnx" --num-threads=4'
+  requiredFiles = @("model.int8.onnx", "tokens.txt", "am.mvn")
+} | ConvertTo-Json -Depth 4
+[IO.File]::WriteAllText(
+  (Join-Path $paraformerDir "engine.json"),
+  $paraformerConfig,
   (New-Object Text.UTF8Encoding($false))
 )
 
